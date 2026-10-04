@@ -1,10 +1,10 @@
 import asyncio
 from contextlib import asynccontextmanager, suppress
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
 
 from backend.app.config import Settings
-from backend.app.domain.registry import EQUIPMENT, make_registry
+from backend.app.domain.registry import EQUIPMENT, PROCESS_FLOWS, make_registry
 from backend.app.domain.state import BoilerState
 from backend.app.replay.csv_source import columns
 from backend.app.streaming.consumer import consume
@@ -35,12 +35,24 @@ async def health():
 @app.get("/api/registry")
 async def registry():
     return {"sensors": app.state.boiler.registry, "equipment": EQUIPMENT,
+            "hierarchy": {"id": "boiler", "children": [item["id"] for item in EQUIPMENT] + ["generation", "unmapped"]},
+            "flows": PROCESS_FLOWS,
             "position_basis": "Logical scene coordinates; not physical instrument positions"}
 
 
 @app.get("/api/state")
 async def state():
     return app.state.boiler.snapshot()
+
+
+@app.get("/api/sensors/history")
+async def history(tag: str, limit: int = Query(120, ge=1, le=3600)):
+    boiler = app.state.boiler
+    if tag not in boiler.registry:
+        raise HTTPException(404, "Unknown sensor tag")
+    return {"tag": tag, "unit": boiler.registry[tag]["unit"], "points": [
+        {"sequence": event["sequence"], "source_time": event["source_time"], **event["sensors"][tag]}
+        for event in list(boiler.history)[-limit:]]}
 
 
 @app.websocket("/api/ws")

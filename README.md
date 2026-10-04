@@ -4,12 +4,12 @@
 
 ## 현재 상태
 
-Phase 1 구현 및 실제 Kafka/Chromium E2E 통과. 다음 작업은 Phase 2.
+Phase 1·2 구현 및 실제 Kafka/Chromium E2E 통과. 다음 작업은 Phase 3.
 
 | Phase | 상태 | 내용 |
 | --- | --- | --- |
 | 1 | 검증 완료 | 원본 재생, Kafka, WebSocket, 2.5D Scene, 연결/결측 상태 |
-| 2 | 예정 | 전체 Tag Registry, 논리 매핑, 이력·관련 Tag |
+| 2 | 검증 완료 | 전체 Tag Registry, 논리 매핑, 이력·관련 Tag |
 | 3 | 예정 | 실제·목표·제어값 비교, 변화율, 분포 편차 |
 | 4 | 예정 | 검증된 Read Tool을 사용하는 AI Agent |
 | 5 | 예정 | 온도 예측 평가와 운전 참고 정보 |
@@ -47,7 +47,7 @@ npm.cmd run build --prefix frontend
 cd frontend
 npx.cmd playwright install chromium
 cd ..
-$env:E2E_PHASE = 'phase1'
+$env:E2E_PHASE = 'phase2'
 node scripts/e2e.mjs
 ```
 

@@ -98,6 +98,26 @@ try {
   await fallback.getByTestId('inspector-tag').waitFor();
   await fallback.screenshot({ path: resolve(out, 'fallback.png'), fullPage: true });
   pass('WebGL unavailable retains selectable equipment and live values');
+  if (phase !== 'phase1') {
+    const registry = await (await fetch('http://127.0.0.1:8000/api/registry')).json();
+    assert.deepEqual(Object.keys(registry.sensors), profile.columns.filter(tag => tag !== '일자'));
+    for (const sensor of Object.values(registry.sensors)) {
+      assert.ok(sensor.mapping_basis);
+      if (sensor.mapping_confidence === 'unverified') assert.equal(sensor.scene_position, null);
+      if (sensor.scene_position) assert.equal(sensor.scene_position.every(Number.isFinite), true);
+    }
+    const tag = '급탄기 A 속도 평균값 ';
+    await page.getByRole('button', { name: `센서 ${tag}`, exact: true }).click();
+    assert.equal(await page.getByTestId('inspector-tag').textContent(), tag);
+    await page.getByRole('img', { name: `${tag} 최근 추이` }).waitFor();
+    const history = await (await fetch(`http://127.0.0.1:8000/api/sensors/history?tag=${encodeURIComponent(tag)}`)).json();
+    assert.equal(history.points.length, 16);
+    assert.equal(history.points[15].value, Number(expected.measurements[tag]));
+    assert.equal(history.points[15].source_time, expected.source_time);
+    assert.equal((await fetch('http://127.0.0.1:8000/api/sensors/history?tag=unknown')).status, 404);
+    await page.screenshot({ path: resolve(out, 'sensor-history.png'), fullPage: true });
+    pass('All raw tags trace to registry; unknown positions remain unmapped; selected history matches source');
+  }
   assert.deepEqual(errors, []);
   writeFileSync(resolve(out, 'telemetry.jsonl'), [...telemetry.values()].map(event => JSON.stringify(event)).join('\n') + '\n');
   result.passed = true;

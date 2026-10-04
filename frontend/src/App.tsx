@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { BoilerViewport } from './BoilerScene';
 import { connectTelemetry, formatValue, useConnection, useEvents, useReading, useTelemetry } from './telemetry';
 import type { Registry, Sensor } from './types';
+import { SensorTrend } from './SensorTrend';
 
 function KPI({ sensor, onSelect }: { sensor: Sensor; onSelect: () => void }) {
   const value = useReading(sensor.tag);
@@ -29,7 +30,7 @@ export default function App() {
   }, [registry]);
   const sensor = selected ? registry?.sensors[selected] : null;
   const reading = selected ? telemetry.current?.sensors[selected] : null;
-  const kpis = Object.values(registry?.sensors ?? {}).filter(sensor => sensor.representative).slice(0, 6);
+  const kpis = ['실제 출력값', '목표 발전량', '총 주증기 유량', '터빈용 주증기 압력', '최종과열기 출구 온도 평균값', '배기가스 산소 중간값'].flatMap(tag => registry?.sensors[tag] ? [registry.sensors[tag]] : []);
   const status = connection !== 'CONNECTED' ? connection : telemetry.status;
   return <div className="app-shell">
     <header className="topbar"><a href="/" className="brand"><span className="brand-mark">B</span>BoilerOps <span>AGENT</span></a><div className="workspace-label">OPERATIONS WORKSPACE <b>한국중부발전 · 공개 운전데이터</b></div><span className={`status ${status.toLowerCase()}`} data-testid="stream-status">● {status}</span></header>
@@ -43,6 +44,8 @@ export default function App() {
         {sensor ? <div className="sensor-detail"><span className="tag-kind">{sensor.measurement_type}</span><h3 data-testid="inspector-tag">{sensor.tag}</h3><div className="current-value" data-testid="inspector-value">{formatValue(reading ?? undefined)}</div><div className="quiet">{sensor.unit ?? '단위 미확인'} · {reading?.quality ?? '대기 중'}</div>
           <dl><dt>Source time</dt><dd data-testid="inspector-time">{telemetry.current?.source_time ?? '—'}</dd><dt>Mapping</dt><dd>{sensor.mapping_confidence}</dd><dt>근거</dt><dd>{sensor.mapping_basis}</dd><dt>원본값</dt><dd>{reading?.raw || '결측'}</dd></dl>
           <p className="note">화면 위치는 계통 탐색을 위한 논리 좌표입니다.</p>
+          <SensorTrend key={sensor.tag} tag={sensor.tag} />
+          <details className="related-tags"><summary>Related tags · {sensor.related_tags.length}</summary>{sensor.related_tags.map(tag => <button key={tag} onClick={() => setSelected(tag)}>{tag}</button>)}</details>
         </div> : <div className="empty-inspector"><span>⌖</span><h3>설비에서 센서를 선택하세요</h3><p>현재값과 원본 Tag, 위치 근거를 함께 확인합니다.</p></div>}
         <div className="sensor-browser"><label htmlFor="sensor-search">SENSOR DIRECTORY</label><input id="sensor-search" placeholder="Tag 검색…" value={filter} onChange={event => setFilter(event.target.value)} /><div className="sensor-list">{Object.values(registry?.sensors ?? {}).filter(sensor => sensor.label.includes(filter)).map(sensor => <button key={sensor.tag} onClick={() => setSelected(sensor.tag)} aria-pressed={selected === sensor.tag}><span>{sensor.label}</span><small>{sensor.equipment}</small></button>)}</div></div>
       </aside>

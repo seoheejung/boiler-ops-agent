@@ -25,16 +25,42 @@ REPRESENTATIVE = {
 }
 
 
+PROCESS_FLOWS = [
+    {"id": "flue-gas", "label": "연소 / 배기가스 논리 흐름", "equipment": ["feeders", "furnace", "superheater", "economizer", "scr", "stack"]},
+    {"id": "water-steam", "label": "급수 / 증기 논리 흐름", "equipment": ["economizer", "furnace", "superheater"]},
+]
+
+
+def classify(tag):
+    if tag in REPRESENTATIVE:
+        return REPRESENTATIVE[tag]
+    groups = [
+        (("선택적 촉매",), "scr"), (("재열",), "reheater"),
+        (("과열", "주증기"), "superheater"), (("절탄", "급수"), "economizer"),
+        (("급탄", "석탄"), "feeders"), (("노내", "보일러 노", "기수분리", "버너", "공기", "산소 제어", "산소농도"), "furnace"),
+        (("배기가스", "불투명도", "굴뚝"), "stack"), (("발전량", "출력값"), "generation"),
+    ]
+    for tokens, equipment in groups:
+        if any(token in tag for token in tokens):
+            explicit = any(token in tag for token in ("입구", "출구", "급탄기", "좌측", "우측", "전면", "굴뚝"))
+            return equipment, "verified-by-tag" if explicit else "logical-group"
+    return "unmapped", "unverified"
+
+
 def make_registry(tags: list[str]):
     equipment_by_id = {item["id"]: item for item in EQUIPMENT}
     result = {}
     for tag in tags:
-        equipment, confidence = REPRESENTATIVE.get(tag, ("unmapped", "unverified"))
+        equipment, confidence = classify(tag)
         item = equipment_by_id.get(equipment)
         position = None if item is None else [item["position"][0], item["size"][1] + .4, item["position"][2]]
-        result[tag] = {"tag": tag, "label": tag.strip(), "equipment": equipment, "section": equipment,
-                       "measurement_type": "target" if tag.startswith("목표") else "measurement",
+        role = "target" if tag.startswith("목표") else "control" if any(word in tag for word in ("제어", "요구값", "밸브", "기울기")) else "measurement"
+        section = "inlet" if "입구" in tag else "outlet" if "출구" in tag else equipment
+        result[tag] = {"tag": tag, "label": tag.strip(), "equipment": equipment, "section": section,
+                       "measurement_type": role,
                        "unit": None, "mapping_confidence": confidence, "scene_position": position,
                        "mapping_basis": f"CSV column: {tag}" if confidence != "unverified" else "미확인",
                        "representative": tag in REPRESENTATIVE}
+    for tag, sensor in result.items():
+        sensor["related_tags"] = [other for other, metadata in result.items() if other != tag and metadata["equipment"] == sensor["equipment"] and sensor["equipment"] != "unmapped"]
     return result

@@ -60,9 +60,10 @@ export function BoilerViewport({ registry, selected, onSelect, onEquipment }: { 
     camera.updateProjectionMatrix(); camera.updateMatrixWorld(); return camera;
   }, [size, zoom, pan]);
   const markers = useMemo(() => registry.equipment.flatMap(item => {
-    const sensor = Object.values(registry.sensors).find(sensor => sensor.equipment === item.id && sensor.scene_position && sensor.representative);
+    const chosen = registry.sensors[selected ?? ''];
+    const sensor = chosen?.equipment === item.id && chosen.scene_position ? chosen : Object.values(registry.sensors).find(sensor => sensor.equipment === item.id && sensor.scene_position && sensor.representative);
     return sensor ? [sensor] : [];
-  }), [registry]);
+  }), [registry, selected]);
   const fallback = <div className="fallback"><b>3D VIEW UNAVAILABLE</b><p>설비 목록에서 센서를 선택할 수 있습니다.</p><span>{telemetry.status} · Kafka {telemetry.kafka}</span></div>;
   return <section className="viewport panel" aria-label="보일러 계통도">
     <div className="panel-heading"><div><span className="eyebrow">PLANT OVERVIEW</span><h2>Boiler operations</h2></div><span className="quiet">논리 계통도 · 실제 설비 좌표 아님</span></div>
@@ -82,5 +83,6 @@ export function BoilerViewport({ registry, selected, onSelect, onEquipment }: { 
       <div className="scene-caption">ISOMETRIC VIEW <span>01 / BOILER SYSTEMS</span></div>
     </div>
     <nav className="equipment-nav" aria-label="설비 선택">{registry.equipment.map((item, index) => <button key={item.id} onClick={() => onEquipment(item.id)}><span>{String(index + 1).padStart(2, '0')}</span>{item.label}</button>)}</nav>
+    <div className="process-flows">{registry.flows.map(flow => <div key={flow.id}><span>{flow.label}</span><small>{flow.equipment.join(' → ')}</small></div>)}</div>
   </section>;
 }
