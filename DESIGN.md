@@ -4,172 +4,285 @@
 
 이 문서는 **Phase 1 — Realtime Boiler Monitoring** 화면만 정의한다.
 
-AI Agent Chat, 예측 결과, 제어 권고, Human Approval 화면은 현재 범위에 포함하지 않는다.
+현재 화면은 React + TypeScript + Vite와 React Three Fiber를 사용한다.
+
+AI Agent Chat, Forecast, Control Advisory, Write Tool, Human Approval 화면은 현재 범위에 포함하지 않는다.
+
+---
 
 ## 2. 화면 목적
 
-사용자가 한 화면에서 세 가지를 확인할 수 있어야 한다.
+사용자는 한 화면에서 아래 정보를 확인할 수 있어야 한다.
 
-1. 데이터가 실제로 실시간 수신 중인지
+1. 데이터가 실제로 수신 중인지
 2. 현재 보일러의 주요 운전값이 무엇인지
-3. 해당 값이 어느 논리 계통에 속하는지
+3. 값이 어느 설비·계통에 속하는지
+4. 어떤 Sensor를 선택했는지
+5. 최신 Event가 어느 시점까지 도달했는지
 
-화면은 발전소 제어실 DCS를 복제하지 않는다. 공개 데이터 기반 프로젝트에서 검증 가능한 범위만 표현한다.
+화면은 발전소 제어실 DCS를 복제하지 않는다.
 
-## 3. 디자인 원칙
+공개 데이터에서 검증 가능한 범위만 표현한다.
 
-- 정보 밀도를 우선한다.
-- 장식보다 상태 식별을 우선한다.
-- 영상 Hero를 사용하지 않는다.
-- 장식 목적의 3D 보일러를 사용하지 않는다.
-- 지속적인 배경 애니메이션을 사용하지 않는다.
-- 실시간 값 변경을 과도한 모션으로 표현하지 않는다.
-- 계통도와 데이터 패널을 독립 컴포넌트로 구성한다.
-- Tag 추가 시 화면 구조를 다시 작성하지 않도록 Metadata 기반으로 연결한다.
-- 색상만으로 연결 상태나 오류 상태를 전달하지 않는다.
-- 실제 센서 위치가 확인되지 않은 경우 정밀 좌표처럼 보이게 표현하지 않는다.
+---
 
-## 4. Desktop Layout
+## 3. 디자인 방향
 
-기본 대상은 데스크톱 모니터다.
+> **산업 소프트웨어처럼 보이기 위한 UI가 아니라, 산업 상태를 더 빨리 이해하기 위한 UI**
+
+보일러를 카드와 표의 배경으로 두지 않는다.
+
+보일러 자체를 메인 Navigation으로 사용한다.
 
 ```text
-┌──────────────────────────────────────────────────────────────────────┐
-│ BoilerOps Agent                STREAMING ●  KAFKA ●  WS ●           │
-│ Source 2025-.. ..:..  Seq 1024                 Replay 1000 ms       │
-├──────────────────────────────────────────────────────────────────────┤
-│ Actual Output │ Target Output │ Main Steam │ Steam Pressure │ O2     │
-├─────────────────────────────────────────────┬────────────────────────┤
-│                                             │ Selected Sensor        │
-│              BOILER SCHEMATIC               │                        │
-│                                             │ Name                   │
-│ Feeder → Furnace → SH/RH → Econ → SCR      │ Current Value          │
-│    ●        ●        ●       ●      ●       │ Source Time            │
-│                                             │ Mapping Confidence     │
-│                                             │ Recent Trend           │
-├─────────────────────────────────────────────┴────────────────────────┤
-│ LIVE TELEMETRY                                                       │
-│ Seq 1022 | Source Time | Output | Steam | Temperature | ...         │
-│ Seq 1023 | Source Time | Output | Steam | Temperature | ...         │
-│ Seq 1024 | Source Time | Output | Steam | Temperature | ...         │
-└──────────────────────────────────────────────────────────────────────┘
+Plant Overview
+→ Equipment
+→ Sensor
+→ Current Value / Trend
 ```
 
-## 5. 화면 영역
+3D는 시각 효과가 아니라 **설비 문맥을 제공하는 인터랙티브 맵**이다.
 
-### 5.1 Header / Stream Status
+---
 
-표시 항목:
+## 4. 2.5D Isometric 원칙
 
-- `BoilerOps Agent`
-- Streaming 상태
-- Kafka 상태
-- WebSocket 상태
-- Source Time
-- Event Sequence
-- Replay Interval
+완전 자유형 3D Viewer를 만들지 않는다.
 
-상태 값:
+고정된 Isometric 시점을 사용한다.
+
+### 허용
+
+- Equipment 선택
+- Sensor 선택
+- 제한된 Zoom
+- 제한된 Pan
+- Hover 또는 선택 Highlight
+- Sensor Tooltip
+- 공정 흐름을 이해하기 위한 제한적 Flow 표현
+
+### 사용하지 않음
+
+- 자유 Rotate
+- Orbit 중심의 탐색
+- 1인칭 이동
+- Fly Camera
+- Cinematic Camera
+- 과도한 Bloom
+- 장식 Particle
+- 끊임없이 움직이는 기계 Animation
+- 게임 효과음
+
+사용자가 카메라 조작 때문에 설비 위치를 다시 찾아야 하는 상황을 만들지 않는다.
+
+---
+
+## 5. 화면 구조
+
+기본 대상은 Desktop이다.
 
 ```text
-CONNECTED
-RECONNECTING
-DISCONNECTED
-ERROR
+┌────────────────────────────────────────────────────────────────────────┐
+│ BoilerOps Agent          ● LIVE      14:32       Kafka ●   WS ●       │
+├────────────────────────────────────────────────────────────────────────┤
+│ Output │ Target │ Steam Flow │ Steam Pressure │ O2 │ NOx              │
+├─────────────────────────────────────────────────┬──────────────────────┤
+│                                                 │ Equipment Inspector  │
+│                                                 │                      │
+│             ISOMETRIC BOILER VIEW               │ Sensor / Equipment   │
+│                                                 │ Current Value        │
+│     Feeder → Furnace → SH/RH → Econ → SCR      │ Source Time          │
+│       ●         ●        ●       ●       ●       │ Mapping Confidence   │
+│                                                 │ Recent Trend         │
+│                                                 │ Related Tags         │
+├─────────────────────────────────────────────────┴──────────────────────┤
+│ LIVE OPERATIONS                                           14:32:01    │
+│ ● Superheater   Temperature   ...                                     │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
-화면의 값이 더 이상 갱신되지 않는 경우 `CONNECTED`처럼 보이지 않아야 한다.
+권장 비율:
 
-### 5.2 KPI Strip
+- Header / KPI: 약 15%
+- Boiler View + Inspector: 약 70%
+- Live Operations: 약 15%
 
-Phase 1 대표 KPI 후보:
+화면 높이가 부족할 경우 Boiler View를 우선한다.
 
-- 실제 출력값
-- 목표 발전량
-- 총 주증기 유량
-- 터빈용 주증기 압력
-- 최종과열기 출구 온도 평균값
-- 배기가스 산소 중간값
-- 과열기 스프레이 총 유량
-- 굴뚝용 질소산화물 분석기
+---
 
-원본 데이터 정의에서 단위를 확인하기 전까지 UI에 단위를 추정해 붙이지 않는다.
+## 6. Component 구조
 
-KPI Card 구성:
+일반 React UI:
 
 ```text
-Label
-Value
-Source Time
+MonitoringPage
+├─ StatusBar
+├─ KPIBar
+├─ BoilerViewport
+├─ EquipmentInspector
+└─ OperationsFeed
 ```
 
-Phase 1에서는 전 행 대비 증감률, 정상·위험 Badge를 임의로 추가하지 않는다.
-
-## 6. Boiler Schematic
-
-### 6.1 목적
-
-보일러 구조도는 값을 실제 설비 문맥으로 이해하기 위한 **논리 계통도**다.
-
-실제 한국중부발전 설비의 P&ID, DCS 화면, 배관 위치를 재현한다고 표현하지 않는다.
-
-### 6.2 초기 계통
+3D Scene:
 
 ```text
-Fuel / Feeder
-      ↓
-Combustion / Furnace
-      ↓
+BoilerScene
+├─ PlantEnvironment
+├─ Feeders
+├─ Furnace
+├─ Superheater
+├─ Reheater
+├─ Economizer
+├─ SCR
+├─ Stack
+├─ ProcessFlow
+└─ SensorMarkers
+```
+
+3D 코드와 Dashboard UI 상태를 하나의 대형 Component에 섞지 않는다.
+
+---
+
+## 7. Boiler Scene
+
+### 7.1 표현 수준
+
+Scene은 실제 중부발전 호기의 정밀 형상을 복제하지 않는다.
+
+목표는 **논리적 설비 관계를 공간적으로 이해시키는 것**이다.
+
+초기 Scene은 단순 Geometry로 구성한다.
+
+- Box
+- Cylinder
+- Pipe-like Line
+- Plane
+- Marker
+
+복잡한 외부 GLTF Asset은 Phase 1 기본 범위에 포함하지 않는다.
+
+### 7.2 기본 배치
+
+```text
+Feeders
+   ↓
+Furnace
+   ↓
 Superheater / Reheater
-      ↓
+   ↓
 Economizer
-      ↓
-SCR / Flue Gas
+   ↓
+SCR
+   ↓
+Stack
 ```
 
-급수·증기 흐름은 계통도 안에서 별도 라인으로 구분할 수 있다.
+급수·증기 계통은 별도 Flow로 구분할 수 있다.
 
 ```text
 Feedwater
-    ↓
+   ↓
 Economizer
-    ↓
+   ↓
 Furnace / Waterwall
-    ↓
+   ↓
 Superheater
-    ↓
+   ↓
 Main Steam
 
 Turbine Return
-    ↓
+   ↓
 Reheater
-    ↓
+   ↓
 Reheated Steam
 ```
 
-실제 배관 연결을 확정할 근거가 없는 세부 연결은 그리지 않는다.
+근거가 없는 세부 배관은 그리지 않는다.
 
-### 6.3 Component 구조
+---
+
+## 8. Camera
+
+기본 Camera는 고정된 Isometric Angle을 사용한다.
+
+초기 요구사항:
+
+- 첫 진입 시 전체 Boiler Scene이 한 화면에 보임
+- Equipment가 Inspector와 겹치지 않음
+- Label과 Sensor Marker가 화면 경계 밖으로 빠지지 않음
+- Zoom 제한 존재
+- Pan 제한 존재
+- Rotate 비활성화
+
+카메라 상태는 Monitoring UX를 해치지 않는 범위만 허용한다.
+
+---
+
+## 9. Process Flow 표현
+
+Flow는 장식 Animation이 아니다.
+
+공정 관계를 이해시키기 위한 보조 정보다.
+
+표현 대상:
 
 ```text
-BoilerSchematic
-├─ FeederSection
-├─ FurnaceSection
-├─ SuperheaterSection
-├─ ReheaterSection
-├─ EconomizerSection
-├─ ScrSection
-├─ FlowLine
-└─ SensorPin
+Coal / Fuel
+Air
+Feedwater / Steam
+Flue Gas
 ```
 
-SVG 또는 DOM 기반 컴포넌트로 구현한다.
+기본은 정적인 Line이다.
 
-센서가 추가될 때 보일러 SVG 자체를 수정하지 않도록 `SensorPin`은 Metadata 기반으로 배치한다.
+Animation이 필요한 경우 느리고 제한적인 방향 표시만 사용한다.
 
-## 7. Sensor Mapping
+Scene의 모든 Line을 계속 움직이게 만들지 않는다.
 
-Sensor Metadata 최소 구조:
+---
+
+## 10. Sensor Marker
+
+Sensor Marker는 전체 Scene에서 가장 중요한 인터랙션 요소다.
+
+기본 상태에서는 작은 Marker만 표시한다.
+
+상태:
+
+```text
+LIVE
+SELECTED
+STALE
+ERROR
+UNMAPPED
+```
+
+`NORMAL`, `WARNING`, `CRITICAL`은 Phase 1에 사용하지 않는다.
+
+색상만으로 상태를 구분하지 않는다.
+
+Shape, Icon, Border, Label 중 최소 하나를 함께 사용한다.
+
+### Hover
+
+```text
+Final Superheater Outlet
+Value: ...
+Source Time: ...
+```
+
+### Select
+
+선택 시 Inspector를 갱신한다.
+
+Scene 위에 큰 Detail Panel을 띄우지 않는다.
+
+---
+
+## 11. Sensor Mapping
+
+Metadata 최소 구조:
 
 ```text
 tag
@@ -179,20 +292,16 @@ section
 measurement_type
 unit
 mapping_confidence
-ui_position
+scene_position
 ```
 
-`unit`은 미확인 상태를 허용한다.
+`scene_position`은 실제 센서 설치 좌표가 아니다.
 
-`ui_position`은 실제 물리 좌표가 아니라 화면의 논리 계통 위치다.
+논리 설비 내부의 화면 좌표다.
 
-### 7.1 Mapping Confidence
+### `verified-by-tag`
 
-#### `verified-by-tag`
-
-컬럼명이 위치를 직접 설명하는 경우.
-
-예:
+Column Name이 위치를 직접 설명하는 경우.
 
 ```text
 절탄기 입구 급수 온도 중간값
@@ -208,19 +317,78 @@ ui_position
 → Feeder A
 ```
 
-#### `logical-group`
+### `logical-group`
 
-계통은 확인할 수 있지만 실제 계측 지점은 확인할 수 없는 경우.
+계통은 알 수 있지만 실제 계측 지점은 확인할 수 없는 경우.
 
-#### `unverified`
+### `unverified`
 
 공개 정보로 위치를 판단할 수 없는 경우.
 
-`unverified` Tag는 계통도 위에 정밀 Sensor Pin으로 배치하지 않는다.
+`unverified` Tag는 정밀 Sensor Marker로 배치하지 않는다.
 
-## 8. Selected Sensor Panel
+---
 
-Sensor Pin을 선택하면 우측 패널에 표시한다.
+## 12. Status Bar
+
+표시:
+
+- `BoilerOps Agent`
+- Streaming 상태
+- Kafka 상태
+- WebSocket 상태
+- Source Time
+- Event Sequence
+- Replay Interval
+
+Connection State:
+
+```text
+LIVE
+RECONNECTING
+DISCONNECTED
+ERROR
+STALE
+```
+
+값이 갱신되지 않을 때 `LIVE`처럼 보여서는 안 된다.
+
+---
+
+## 13. KPI Bar
+
+Phase 1 대표 KPI 후보:
+
+- 실제 출력값
+- 목표 발전량
+- 총 주증기 유량
+- 터빈용 주증기 압력
+- 최종과열기 출구 온도 평균값
+- 배기가스 산소 중간값
+- 과열기 스프레이 총 유량
+- 굴뚝용 질소산화물 분석기
+
+한 화면에 모두 들어가지 않으면 우선순위를 정해 일부만 표시한다.
+
+Card 구조:
+
+```text
+Label
+Value
+Source Time
+```
+
+단위는 원본 정의에서 확인한 값만 표시한다.
+
+증감률과 산업 안전 Badge를 임의 추가하지 않는다.
+
+---
+
+## 14. Equipment Inspector
+
+Equipment 또는 Sensor 선택 시 오른쪽 Panel을 갱신한다.
+
+Sensor 기준:
 
 ```text
 Sensor Label
@@ -232,148 +400,245 @@ Equipment
 Section
 Mapping Confidence
 Recent Trend
+Related Tags
 ```
 
-Phase 1 Recent Trend는 현재 세션에서 수신한 최근 데이터 범위만 사용해도 된다.
+Phase 1 Trend는 현재 세션에서 수신한 최근 데이터만 사용해도 된다.
 
-DB 저장이나 장기간 Historical Query는 Phase 1 범위가 아니다.
+장기 Historical Query는 Phase 1 범위가 아니다.
 
-## 9. Live Telemetry
+선택하지 않은 경우 Boiler 전체 요약을 표시할 수 있다.
 
-목적은 Kafka → WebSocket → UI 순서를 사람이 눈으로 검증할 수 있게 만드는 것이다.
+---
 
-표시 컬럼:
+## 15. Operations Feed
+
+기존의 큰 Raw Telemetry Table 대신 **Operations Event Feed**를 사용한다.
+
+목적:
+
+> Kafka → WebSocket → UI Event가 실제로 진행 중임을 사용자가 눈으로 확인
+
+표시 예:
 
 ```text
-Sequence
-Source Time
-Emitted At
-대표 측정값
+14:32:00  Generation    Output          ...
+14:32:00  Superheater   Temperature     ...
+14:32:00  Combustion    O2              ...
+14:32:00  Reheater      Temperature     ...
 ```
 
-규칙:
+내부적으로 Event 단위 Sequence를 확인할 수 있어야 한다.
 
-- 최신 Event가 식별 가능해야 한다.
-- 동일 Sequence 중복 수신을 식별할 수 있어야 한다.
-- 순서가 역전된 Event를 정상처럼 섞어 표시하지 않는다.
-- 화면 성능을 위해 표시 행 수를 제한할 수 있다.
-- 표시 제한 때문에 E2E 검증용 원본 Event Trace를 삭제하지 않는다.
-
-## 10. Connection / Error State
-
-### Kafka 오류
-
-Backend가 Kafka를 소비하지 못하는 경우 UI에 Backend Stream 상태를 오류로 전달할 수 있어야 한다.
-
-### WebSocket 오류
-
-표시:
+필수 데이터:
 
 ```text
-RECONNECTING
+sequence
+source_time
+emitted_at
+representative_measurements
 ```
 
-자동 재연결 시 기존 최신값을 즉시 삭제할 필요는 없지만, 값이 `stale` 상태임을 명확하게 표시한다.
+UI 표시 행 수는 제한할 수 있다.
 
-### 데이터 파싱 오류
+E2E Trace 원본을 UI 제한에 맞춰 삭제하지 않는다.
 
-특정 Tag 오류 때문에 전체 Dashboard가 렌더링 실패하면 안 된다.
+---
 
-오류 Tag는 값 대신 식별 가능한 상태를 표시한다.
+## 16. 상태 색상 의미
+
+Phase 1 색상은 안전 상태를 뜻하지 않는다.
+
+색상은 시스템 상태와 선택 상태를 구분하는 데만 사용한다.
+
+예:
+
+- Live
+- Selected
+- Stale
+- Error
+- Unmapped
+
+위험·정상 의미를 가진 강한 빨강·초록 구분은 Domain Threshold가 확정된 이후에만 도입한다.
+
+---
+
+## 17. React Three Fiber 상태 구조
+
+WebSocket Event마다 React Tree 전체를 다시 렌더링하지 않는다.
+
+목표 흐름:
 
 ```text
-INVALID
-MISSING
+WebSocket Message
+       ↓
+Telemetry Store
+       ↓
+Changed Tags
+       ↓
+KPI / Inspector / Sensor Marker
 ```
 
-`0`으로 대체하지 않는다.
+Scene의 정적 설비 Geometry와 실시간 Sensor State를 분리한다.
 
-## 11. Responsive 기준
+### 금지
+
+- `useFrame` 안에서 매 Frame 전역 `setState`
+- Event마다 Geometry 재생성
+- Event마다 Material 재생성
+- Scene 전체 Key 변경을 이용한 강제 Remount
+- UI와 Scene 데이터를 별도 Source of Truth로 중복 관리
+
+### 허용
+
+- 변경된 Sensor Marker만 갱신
+- Geometry / Material 재사용
+- 필요 시 Instancing
+- 필요 시 Demand 기반 렌더링 검토
+
+성능 최적화는 측정 결과를 기준으로 적용한다.
+
+---
+
+## 18. WebGL Fallback
+
+Canvas 생성 실패 또는 WebGL 사용 불가 환경에서 빈 화면만 보여주지 않는다.
+
+Fallback 최소 표시:
+
+```text
+3D VIEW UNAVAILABLE
+
+현재 Streaming 상태
+대표 KPI
+선택 가능한 Equipment 목록
+```
+
+Fallback은 Phase 1 E2E에서 검증 대상에 포함한다.
+
+---
+
+## 19. Responsive
 
 ### Desktop
 
-- Schematic + Sensor Detail 2열
+기본 환경.
+
+- Boiler View + Inspector 2열
 - KPI 가로 배치
-- Live Telemetry 하단 전체 폭
+- Operations Feed 하단
+- Scene 비율 우선
 
-### 좁은 화면
+### Narrow Desktop / Tablet
 
-- KPI Wrap
-- Schematic 단일 열
-- Sensor Detail을 Schematic 아래 배치
-- Live Telemetry 가로 스크롤 허용
+- Inspector를 Overlay 또는 하단 Panel로 이동 가능
+- KPI Wrap 허용
+- Scene 최소 높이 보장
+- Operations Feed 높이 축소 가능
 
 모바일 전용 별도 IA는 Phase 1에서 만들지 않는다.
 
-## 12. 접근성
+---
 
-- 상태를 색상 하나로 구분하지 않는다.
-- Sensor Pin에 접근 가능한 Label을 제공한다.
+## 20. 접근성
+
+- 색상 하나로 상태를 전달하지 않는다.
+- Sensor Marker에 접근 가능한 Label을 제공한다.
 - Keyboard Focus 상태를 제거하지 않는다.
 - 실시간 갱신 때문에 현재 Focus가 이동하면 안 된다.
-- 숫자 변경마다 Screen Reader에 과도한 Live Announcement를 발생시키지 않는다.
+- 숫자 변경마다 Screen Reader Live Announcement를 발생시키지 않는다.
+- 3D Scene 사용이 불가능한 환경을 위한 Fallback을 제공한다.
 
-## 13. 성능 기준
+---
 
-분 단위 원본 데이터를 빠른 Replay 속도로 재생할 수 있으므로 UI는 Message마다 전체 페이지를 재구성하지 않는다.
+## 21. 시각 스타일
 
-- 최신 Boiler State와 Live Event 목록 상태를 분리한다.
-- Schematic의 정적 구조와 Sensor 값 렌더링을 분리한다.
-- Trend 데이터는 화면 표시 범위를 제한한다.
-- 긴 Telemetry 목록은 필요한 시점에 Virtualization을 검토한다.
-- Phase 1에서 필요하지 않으면 Virtualization 패키지를 선반영하지 않는다.
+목표:
 
-## 14. 시각 스타일
+> **게임형 공간 이해 방식 + 운영 소프트웨어의 정보 정확성**
 
-목표는 **산업 모니터링 화면**이다.
+사용:
 
-- 밝은 배경 또는 짙은 중립 배경 중 하나의 Theme만 Phase 1에서 선택
+- 밝거나 어두운 중립 배경 중 하나
 - 높은 정보 대비
-- 일정한 숫자 정렬
-- 단순한 Panel / Border / Divider
-- 상태색 최소 사용
-- 장식적 Gradient 최소화
-- Glassmorphism 사용 금지
-- 과도한 Shadow 사용 금지
-- 숫자와 Tag Label 가독성 우선
+- 명확한 설비 실루엣
+- 제한된 상태색
+- 단순한 Panel
+- 가독성 높은 숫자
+- 충분한 여백
+- 고정된 Inspector
 
-실시간 상태 애니메이션은 연결 Indicator 정도로 제한한다.
+사용하지 않음:
 
-## 15. Phase 1 화면에 넣지 않는 요소
+- Glassmorphism
+- 과도한 Gradient
+- 무거운 Shadow
+- Neon Cyberpunk
+- 과도한 Glow
+- 의미 없는 Hologram
+- 영상 Hero
+- 실제 공장처럼 보이기 위한 과도한 Texture
 
-- AI Chat Panel
+---
+
+## 22. Phase 1에 넣지 않는 요소
+
+- AI Chat
 - Agent Avatar
 - AI Recommendation Card
-- 고장 예측 점수
-- 위험 확률
-- 자동제어 Toggle
-- Valve / Feeder 직접 제어 버튼
-- 승인 Modal
-- Digital Twin 표현
-- 실제 발전소 P&ID처럼 보이는 정밀 배관도
+- Failure Probability
+- Predictive Maintenance Score
+- Automatic Control Toggle
+- Valve 직접 제어
+- Feeder 직접 제어
+- Human Approval Modal
+- Digital Twin 문구
+- 실제 발전소 P&ID처럼 보이는 정밀 배관
+- 실제 발전소 Control Room 복제
 
-해당 기능은 Phase가 시작된 뒤 설계한다.
+---
 
-## 16. 디자인 검증
+## 23. E2E 디자인 검증
 
-Phase 1 E2E에서 최소 한 장의 Dashboard Screenshot을 아티팩트로 남긴다.
+Phase 1 E2E 종료 시 최소 아래 아티팩트를 생성한다.
 
 ```text
-artifacts/e2e/phase1/dashboard.png
+artifacts/e2e/phase1/
+├─ run.json
+├─ telemetry.jsonl
+├─ dashboard.png
+└─ selected-sensor.png
 ```
 
-Screenshot에서 확인 가능해야 하는 정보:
+`dashboard.png`에서 확인 가능해야 하는 정보:
 
-- 연결 상태
+- Live 상태
+- Kafka 상태
+- WebSocket 상태
 - Source Time
 - Sequence
 - 대표 KPI
-- Boiler Schematic
-- Sensor 값
-- Live Telemetry 최신 Event
+- Isometric Boiler Scene
+- Sensor Marker
+- Operations Feed
 
-## 17. 구조 참고 자료
+`selected-sensor.png`에서 확인:
 
+- 선택된 Sensor
+- Scene Highlight
+- Inspector
+- Current Value
+- Source Time
+- Mapping Confidence
+
+---
+
+## 24. 구조 참고
+
+- React Three Fiber: https://r3f.docs.pmnd.rs/
+- React Three Fiber Canvas: https://r3f.docs.pmnd.rs/api/canvas
 - Babcock & Wilcox Radiant Boiler: https://www.babcock.com/assets/PDF-Downloads/Steam-Generation/E101-3193-RB-Boiler-Babcock-Wilcox.pdf
 
-해당 공개자료에서 Furnace, Superheater, Reheater, Economizer, SCR, Coal Feeder 등의 일반적인 계통 구성을 참고할 수 있다. 대상 한국중부발전 설비의 실제 물리 구조를 입증하는 자료로 사용하지 않는다.
+Babcock & Wilcox 자료는 대상 한국중부발전 설비의 실제 도면이 아니다.
+
+일반적인 Furnace, Superheater, Reheater, Economizer, SCR, Coal Feeder 관계를 이해하기 위한 참고자료로만 사용한다.
