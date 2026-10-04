@@ -6,6 +6,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Quer
 from backend.app.config import Settings
 from backend.app.domain.registry import EQUIPMENT, PROCESS_FLOWS, make_registry
 from backend.app.domain.state import BoilerState
+from backend.app.domain.analysis import loop_analysis, sensor_summary
 from backend.app.replay.csv_source import columns
 from backend.app.streaming.consumer import consume
 from backend.app.websocket.hub import Hub
@@ -53,6 +54,22 @@ async def history(tag: str, limit: int = Query(120, ge=1, le=3600)):
     return {"tag": tag, "unit": boiler.registry[tag]["unit"], "points": [
         {"sequence": event["sequence"], "source_time": event["source_time"], **event["sensors"][tag]}
         for event in list(boiler.history)[-limit:]]}
+
+
+@app.get("/api/analysis/loop")
+async def analysis_loop(name: str = "reheater", limit: int = Query(120, ge=1, le=3600)):
+    try:
+        return loop_analysis(app.state.boiler, name, limit)
+    except ValueError as error:
+        raise HTTPException(404, str(error)) from error
+
+
+@app.get("/api/analysis/sensor")
+async def analysis_sensor(tag: str):
+    try:
+        return sensor_summary(app.state.boiler, tag)
+    except ValueError as error:
+        raise HTTPException(404, str(error)) from error
 
 
 @app.websocket("/api/ws")

@@ -3,6 +3,7 @@ import { BoilerViewport } from './BoilerScene';
 import { connectTelemetry, formatValue, useConnection, useEvents, useReading, useTelemetry } from './telemetry';
 import type { Registry, Sensor } from './types';
 import { SensorTrend } from './SensorTrend';
+import { OperationsAnalysis } from './OperationsAnalysis';
 
 function KPI({ sensor, onSelect }: { sensor: Sensor; onSelect: () => void }) {
   const value = useReading(sensor.tag);
@@ -51,6 +52,7 @@ export default function App() {
       </aside>
     </main>
     <section className="feed panel"><div className="panel-heading"><div><span className="eyebrow">LIVE OPERATIONS</span><h2>Telemetry activity</h2></div><div className="source-stamp"><span data-testid="source-time">{telemetry.current?.source_time ?? '데이터 대기'}</span><b>SEQ <span data-testid="sequence">{telemetry.current?.sequence ?? '—'}</span></b></div></div><div className="feed-rows">{events.slice(-5).reverse().map(event => <div key={`${event.run_id}-${event.sequence}`} className="feed-row"><span>● TELEMETRY</span><time>{event.source_time}</time><span>실제 출력값 <b>{formatValue(event.sensors['실제 출력값'])}</b></span><span>과열기 출구 <b>{formatValue(event.sensors['최종과열기 출구 온도 평균값'])}</b></span><code>#{event.sequence}</code></div>)}{events.length === 0 && <p className="quiet">Kafka에서 첫 이벤트를 기다리고 있습니다.</p>}</div></section>
+    <OperationsAnalysis />
     <footer>BOILEROPS / PUBLIC DATA REPLAY<span>관측 데이터 · 산업 안전 판정 없음</span></footer>
   </div>;
 }

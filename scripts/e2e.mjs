@@ -118,6 +118,21 @@ try {
     await page.screenshot({ path: resolve(out, 'sensor-history.png'), fullPage: true });
     pass('All raw tags trace to registry; unknown positions remain unmapped; selected history matches source');
   }
+  if (Number(phase.replace('phase', '')) >= 3) {
+    const generation = await (await fetch('http://127.0.0.1:8000/api/analysis/loop?name=generation')).json();
+    assert.equal(generation.points.at(-1).source_time, expected.source_time);
+    const delta = Number(expected.measurements['실제 출력값']) - Number(expected.measurements['목표 발전량']);
+    assert.equal(generation.points.at(-1).actual_minus_target, delta);
+    assert.equal(generation.summary.baseline_count, 15);
+    const reheater = await (await fetch('http://127.0.0.1:8000/api/analysis/loop?name=reheater')).json();
+    assert.equal(reheater.target_available, false);
+    assert.ok(reheater.points.every(point => point.actual_minus_target === null));
+    await page.getByTestId('target-missing').waitFor();
+    await page.getByRole('combobox', { name: '분석 Loop' }).selectOption('generation');
+    await poll(async () => await page.getByTestId('target-delta-16').textContent() === delta.toLocaleString('en-US', { maximumFractionDigits: 3 }), 'actual vs target UI');
+    writeFileSync(resolve(out, 'analysis.json'), JSON.stringify({ generation, reheater }, null, 2));
+    pass('Aligned loop actual/target/controls, missing target and prior-only distribution');
+  }
   assert.deepEqual(errors, []);
   writeFileSync(resolve(out, 'telemetry.jsonl'), [...telemetry.values()].map(event => JSON.stringify(event)).join('\n') + '\n');
   result.passed = true;
