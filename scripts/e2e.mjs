@@ -1,10 +1,11 @@
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdirSync, readdirSync, writeFileSync, createWriteStream } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync, createWriteStream } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { chromium } from '../frontend/node_modules/playwright/index.mjs';
+import { validateFailures } from './phase7.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const phase = process.env.E2E_PHASE ?? 'phase1';
@@ -19,6 +20,7 @@ if (Number(phase.replace('phase', '')) >= 6) {
 }
 const children = [];
 const checks = [];
+const telemetry = new Map();
 let browser;
 let page;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -45,7 +47,7 @@ try {
   writeFileSync(resolve(out, 'input.json'), JSON.stringify(profile, null, 2));
   result.input_sha256 = profile.sha256;
   const apiArgs = ['-m', 'uvicorn', 'backend.app.main:app', '--host', '127.0.0.1', '--port', '8000'];
-  const backend = start(python, apiArgs, 'backend');
+  let backend = start(python, apiArgs, 'backend');
   start(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4173', '--strictPort'], 'frontend', resolve(root, 'frontend'));
   await poll(async () => (await (await fetch('http://127.0.0.1:8000/api/health')).json()).kafka === 'CONNECTED', 'Kafka consumer readiness');
   await poll(async () => (await fetch('http://127.0.0.1:4173')).ok, 'frontend readiness');
@@ -54,7 +56,6 @@ try {
   page = await context.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  const telemetry = new Map();
   page.on('websocket', ws => ws.on('framereceived', ({ payload }) => {
     const event = JSON.parse(payload.toString());
     if (event.current) telemetry.set(`${event.current.run_id}:${event.current.sequence}`, event.current);
@@ -91,7 +92,7 @@ try {
   pass('Replay end displays STALE');
   backend.kill();
   await poll(async () => await page.getByTestId('ws-status').textContent() !== 'CONNECTED', 'disconnected', 10000);
-  start(python, apiArgs, 'backend-restarted');
+  backend = start(python, apiArgs, 'backend-restarted');
   await poll(async () => await page.getByTestId('ws-status').textContent() === 'CONNECTED', 'reconnected');
   await poll(async () => await page.getByTestId('sequence').textContent() === '16', 'recovered state');
   pass('WebSocket disconnect/reconnect preserves latest state');
@@ -229,14 +230,28 @@ try {
     await page.screenshot({ path: resolve(out, 'simulator-decision.png'), fullPage: true });
     pass('Real model proposal, authenticated explicit browser approval, immutable decision, rejection and complete write audit');
   }
+  if (phase === 'phase7') {
+    await validateFailures({ page, context, env, out, root, python, poll, pass, restartBackend: async () => {
+      backend.kill();
+      await new Promise(resolve => backend.once('exit', resolve));
+      backend = start(python, apiArgs, 'backend-persistence');
+      await poll(async () => (await fetch('http://127.0.0.1:8000/api/health')).ok, 'backend restarted');
+    } });
+  }
   assert.deepEqual(errors, []);
-  writeFileSync(resolve(out, 'telemetry.jsonl'), [...telemetry.values()].map(event => JSON.stringify(event)).join('\n') + '\n');
+  if (env.SIMULATOR_APPROVAL_TOKEN) {
+    for (const file of readdirSync(out, { recursive: true }).filter(file => /\.(json|jsonl|log)$/.test(file))) {
+      assert.ok(!readFileSync(resolve(out, file), 'utf8').includes(env.SIMULATOR_APPROVAL_TOKEN), `Credential found in artifact ${file}`);
+    }
+    pass('Approval credential absent from JSON, telemetry and log artifacts');
+  }
   result.passed = true;
 } catch (error) {
   result.passed = false; result.error = String(error.stack ?? error);
   if (page) await page.screenshot({ path: resolve(out, 'failure.png'), fullPage: true }).catch(() => {});
   console.error(error); process.exitCode = 1;
 } finally {
+  writeFileSync(resolve(out, 'telemetry.jsonl'), [...telemetry.values()].map(event => JSON.stringify(event)).join('\n') + '\n');
   result.finished_at = new Date().toISOString();
   writeFileSync(resolve(out, 'run.json'), JSON.stringify(result, null, 2));
   await browser?.close();

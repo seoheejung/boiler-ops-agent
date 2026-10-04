@@ -19,6 +19,7 @@ async def replay(limit: int | None = None):
     run_id = str(uuid.uuid4())
     await producer.start()
     try:
+        published = 0
         for source_row, source_time, measurements in rows(settings):
             if source_row < settings.start_row:
                 continue
@@ -26,10 +27,13 @@ async def replay(limit: int | None = None):
             event = {"run_id": run_id, "sequence": sequence, "source_time": source_time,
                      "source_row": source_row, "emitted_at": datetime.now(UTC).isoformat(), "measurements": measurements}
             await producer.send_and_wait(settings.topic, event, partition=0)
+            published += 1
             print(json.dumps({key: event[key] for key in ("run_id", "sequence", "source_time")}), flush=True)
             if limit is not None and sequence >= limit:
                 break
             await asyncio.sleep(settings.interval_ms / 1000)
+        if published == 0:
+            raise ValueError(f"No CSV rows at REPLAY_START_ROW={settings.start_row}")
     finally:
         await producer.stop()
 

@@ -155,6 +155,9 @@ async def websocket(ws: WebSocket):
                 message = await asyncio.wait_for(queue.get(), timeout=.5)
             except TimeoutError:
                 message = app.state.boiler.snapshot()
+            if message.get('type') == 'overflow':
+                await ws.close(code=1013, reason='Telemetry subscriber fell behind; reconnect required')
+                return
             await ws.send_json(message)
 
     async def receive():

@@ -8,7 +8,10 @@ class Hub:
     async def publish(self, message):
         for queue in tuple(self.queues):
             if queue.full():
-                queue.get_nowait()
+                while not queue.empty():
+                    queue.get_nowait()
+                queue.put_nowait({"type": "overflow", "error": "WebSocket subscriber fell behind; reconnect required"})
+                continue
             queue.put_nowait(message)
 
     def subscribe(self):

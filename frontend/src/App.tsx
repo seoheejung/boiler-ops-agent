@@ -7,6 +7,7 @@ import { OperationsAnalysis } from './OperationsAnalysis';
 import { AgentPanel } from './AgentPanel';
 import { ForecastPanel } from './ForecastPanel';
 import { SimulatorPanel } from './SimulatorPanel';
+import { validateRegistry } from './registry';
 
 function KPI({ sensor, onSelect }: { sensor: Sensor; onSelect: () => void }) {
   const value = useReading(sensor.tag);
@@ -26,7 +27,7 @@ export default function App() {
   useEffect(() => {
     const controller = new AbortController();
     fetch('/api/registry', { signal: controller.signal }).then(response => { if (!response.ok) throw new Error(`Registry HTTP ${response.status}`); return response.json(); })
-      .then(setRegistry).catch(error => { if (error.name !== 'AbortError') setError(String(error)); });
+      .then(validateRegistry).then(setRegistry).catch(error => { if (error.name !== 'AbortError') setError(String(error)); });
     return () => controller.abort();
   }, []);
   const onEquipment = useCallback((id: string) => {

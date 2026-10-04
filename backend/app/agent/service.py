@@ -63,9 +63,12 @@ def query_agent(request, tools):
     trace = {"trace_id": trace_id, "created_at": datetime.now(UTC).isoformat(), "request": request.model_dump(),
              "model": os.getenv("OLLAMA_MODEL"), "calls": [], "evidence": [], "snapshot_status": tools.snapshot["status"]}
     try:
+        plan_schema = ToolPlan.model_json_schema()
+        allowed = [name for name in TOOL_NAMES if name != 'get_temperature_forecast' or request.equipment == 'reheater']
+        plan_schema['properties']['tools']['items']['enum'] = allowed
         plan = ToolPlan.model_validate(model_json([
             {"role": "system", "content": "Choose read-only boiler tools relevant to the question. The equipment is fixed by the application. get_temperature_forecast is only available for reheater. Never request writes. Return tools in JSON. Tools: " + ', '.join(TOOL_NAMES)},
-            {"role": "user", "content": json.dumps(request.model_dump(), ensure_ascii=False)}], ToolPlan.model_json_schema()))
+            {"role": "user", "content": json.dumps(request.model_dump(), ensure_ascii=False)}], plan_schema))
         names = list(dict.fromkeys(["get_equipment_status", *plan.tools]))
         for name in names:
             call_id = f"tool-{len(trace['calls']) + 1}"

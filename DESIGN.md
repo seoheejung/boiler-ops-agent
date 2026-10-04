@@ -2,11 +2,12 @@
 
 ## 1. 적용 범위
 
-이 문서는 **Phase 1 — Realtime Boiler Monitoring** 화면만 정의한다.
+이 문서의 기본 Scene·Monitoring 규칙은 **Phase 1 — Realtime Boiler Monitoring**에서 정의했다.
+현재 Phase 1~7 구현 화면의 추가 패널은 문서 끝의 현재 구현 범위를 따른다.
 
 현재 화면은 React + TypeScript + Vite와 React Three Fiber를 사용한다.
 
-AI Agent Chat, Forecast, Control Advisory, Write Tool, Human Approval 화면은 현재 범위에 포함하지 않는다.
+후속 Phase의 분석·Agent·Forecast·Simulator 승인 패널은 Scene과 분리한다.
 
 ---
 
@@ -642,3 +643,14 @@ artifacts/e2e/phase1/
 Babcock & Wilcox 자료는 대상 한국중부발전 설비의 실제 도면이 아니다.
 
 일반적인 Furnace, Superheater, Reheater, Economizer, SCR, Coal Feeder 관계를 이해하기 위한 참고자료로만 사용한다.
+
+## 25. 현재 구현 범위 (Phase 1~7)
+
+- Scene 및 Inspector: 원본 Tag와 논리 좌표, Mapping 근거, 이력·관련 Tag.
+- Operational Analysis: 재열기/발전량 Loop의 같은 시각 실제·목표·관련 입력, 변화율, 과거 분포.
+- Forecast: 재열기 온도 5분 예측, Naive/학습 모델의 시간순 시험 성능, 단위·목표 결측 제약.
+- Read-only Agent: 선택 설비의 질문, 근거 ID가 붙은 응답, 도구 Trace 링크.
+- Controlled Simulator: 차원 없는 데모 값과 별도 제안·승인·거절 패널. 실제 설비 연결 없음.
+- 오류 상태: Kafka/WS/stale, 잘못된 Registry와 좌표, WebGL 소실, Agent 및 승인 오류 표시.
+
+Phase 1에서 제외한 후속 기능은 해당 Phase의 지침·검증을 거쳐 위 패널로 추가했다. Scene 클릭은 선택만 수행한다.

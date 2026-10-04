@@ -4,7 +4,8 @@
 
 ## 현재 상태
 
-Phase 1~6 구현 및 실제 Kafka/Chromium/Ollama E2E 통과. 다음 작업은 Phase 7 통합 실패 경로 검증.
+**Phase 1~7 구현, Phase별 README 갱신·개별 커밋 및 로컬 통합 E2E 검증 완료.**
+실제 원본 CSV, Kafka, Chromium, Ollama 모델로 검증했다. 최종 결과는 [Phase 7 결과](docs/results/phase7-integrated-validation.md)에서 확인한다.
 
 | Phase | 상태 | 내용 |
 | --- | --- | --- |
@@ -14,7 +15,7 @@ Phase 1~6 구현 및 실제 Kafka/Chromium/Ollama E2E 통과. 다음 작업은 P
 | 4 | 검증 완료 | 검증된 Read Tool과 수치 근거 Trace를 사용하는 로컬 AI Agent |
 | 5 | 검증 완료 | 5분 온도 예측, 시간순 평가, Agent 예측 조회 |
 | 6 | 검증 완료 | 명시적 인증·승인 후 로컬 Simulator 변경, SQLite Audit |
-| 7 | 예정 | 통합 실패 경로 E2E |
+| 7 | 검증 완료 | Kafka·WebGL·Agent 실패 복구, 승인 경합·변조·만료 차단 |
 
 ## 실행
 
@@ -22,17 +23,22 @@ Phase 1~6 구현 및 실제 Kafka/Chromium/Ollama E2E 통과. 다음 작업은 P
 원본 CSV를 `data/raw/`에 배치한다. 원본은 Git에 포함하지 않는다.
 
 ```powershell
-Copy-Item .env.example .env
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 uv sync --frozen
 npm.cmd ci --prefix frontend
 docker compose up -d --wait kafka
 uv run python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 ```
 
-별도 터미널:
+Frontend 터미널:
 
 ```powershell
 npm.cmd run dev --prefix frontend
+```
+
+Replay 터미널:
+
+```powershell
 uv run python -m backend.app.replay.producer
 ```
 
@@ -47,17 +53,21 @@ npm.cmd run build --prefix frontend
 cd frontend
 npx.cmd playwright install chromium
 cd ..
-$env:E2E_PHASE = 'phase6'
+$env:E2E_PHASE = 'phase7'
 node scripts/e2e.mjs
 ```
 
 E2E는 8000/4173 포트와 고유 Kafka Topic을 사용하고 종료 시 자신이 시작한 프로세스를 종료한다.
-실제 입력 해시, 원본 첫 16행, WebSocket 이벤트, 결과 JSON, 화면 캡처를 `artifacts/e2e/phaseN/`에 남긴다.
+Phase 7은 프로젝트 Kafka를 일시 중단·복구한다. 이 Compose Broker를 별도 운영 작업과 공유하지 않는다.
+실제 입력 해시, 선택 구간의 16행, WebSocket 이벤트, 결과 JSON, 화면 캡처를 `artifacts/e2e/phaseN/`에 남긴다.
+Phase 5~7은 학습 이후 시험 구간을 사용한다. `E2E_PHASE=phase1`부터 `phase7`까지 선택할 수 있다.
+최종 승인 검증: 무승인 변경 0건, 승인 우회 0건, 거절 후 실행 0건, 실행 Trace 기록률 100%.
 결과 문서는 `docs/results/`에서 확인한다. 단위 테스트는 만들지 않는다.
 
 ## 로컬 AI Agent
 
 Ollama에 `qwen2.5-coder:7b` 모델이 필요하다. `.env.example`의 `OLLAMA_BASE_URL`, `OLLAMA_MODEL`을 설정한다.
+`ollama list`로 모델을 확인하고, 없다면 `ollama pull qwen2.5-coder:7b`로 준비한다.
 외부 API 키는 필요하지 않다. 설비 또는 센서를 선택하고 Agent 조회를 실행한다.
 모델은 허용된 Read Tool과 근거 ID를 선택하며, 수치는 실제 도구 결과로부터 렌더링된다.
 Trace는 `artifacts/agent/traces/`에 저장한다. 모델 오류는 성공 응답으로 대체하지 않는다.
@@ -88,6 +98,6 @@ Simulator는 승인 절차를 확인하는 `demo_bias` 상태 머신이며 물�
 - `목표 재열기 온도`는 전체 결측. 숫자로 대체하지 않는다.
 - 측정 단위, 실제 센서 좌표, 산업 안전 임계값은 미확인.
 - 3D Scene은 논리적 계통 탐색용이며 실제 P&ID 또는 Digital Twin이 아니다.
-- 현재 실행 환경은 로컬 개발·검증용이다. 실제 발전설비 제어 연결은 프로젝트 범위 밖이다.
+- 현재 실행 환경은 로컬 개발·검증용이다. 다중 사용자 인증·프로덕션 배포는 미검증이며 실제 발전설비 제어 연결은 프로젝트 범위 밖이다.
 
 기획: [.project/plan.md](.project/plan.md) · UI: [DESIGN.md](DESIGN.md) · 작업 규칙: [AGENTS.md](AGENTS.md).

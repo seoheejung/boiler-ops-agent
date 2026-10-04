@@ -4,10 +4,11 @@ import os
 import sqlite3
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from backend.app.agent.service import model_json, trace_directory
 
@@ -29,9 +30,9 @@ class Recommendation(BaseModel):
 
 class Decision(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    approve: bool
-    confirm: bool
-    expected_revision: int = Field(ge=0)
+    approve: StrictBool
+    confirm: StrictBool
+    expected_revision: int = Field(ge=0, strict=True)
 
 
 class SimulatorError(Exception):
@@ -53,10 +54,15 @@ class Simulator:
                 CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, created_at REAL NOT NULL, proposal_id TEXT, event TEXT NOT NULL, payload TEXT NOT NULL);
             ''')
 
+    @contextmanager
     def connection(self):
         db = sqlite3.connect(self.path, timeout=10)
         db.row_factory = sqlite3.Row
-        return db
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
 
     def authenticate(self, authorization):
         if len(self.token) < 32:
