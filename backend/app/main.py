@@ -1,4 +1,6 @@
 import asyncio
+import json
+from uuid import UUID
 from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
@@ -7,6 +9,8 @@ from backend.app.config import Settings
 from backend.app.domain.registry import EQUIPMENT, PROCESS_FLOWS, make_registry
 from backend.app.domain.state import BoilerState
 from backend.app.domain.analysis import loop_analysis, sensor_summary
+from backend.app.agent.tools import ReadTools
+from backend.app.agent.service import AgentQuery, AgentFailure, query_agent, trace_directory
 from backend.app.replay.csv_source import columns
 from backend.app.streaming.consumer import consume
 from backend.app.websocket.hub import Hub
@@ -70,6 +74,33 @@ async def analysis_sensor(tag: str):
         return sensor_summary(app.state.boiler, tag)
     except ValueError as error:
         raise HTTPException(404, str(error)) from error
+
+
+@app.get("/api/tools/{name}")
+async def read_tool(name: str, equipment: str, tag: str | None = None):
+    try:
+        return ReadTools(app.state.boiler, equipment, tag).call(name)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+
+
+@app.post("/api/agent/query")
+async def agent_query(request: AgentQuery):
+    try:
+        tools = ReadTools(app.state.boiler, request.equipment, request.tag)
+        return await asyncio.to_thread(query_agent, request, tools)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+    except AgentFailure as error:
+        raise HTTPException(503, {"trace_id": error.trace_id, "error": str(error)}) from error
+
+
+@app.get("/api/agent/traces/{trace_id}")
+async def agent_trace(trace_id: UUID):
+    path = trace_directory() / f"{trace_id}.json"
+    if not path.is_file():
+        raise HTTPException(404, "Trace not found")
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 @app.websocket("/api/ws")

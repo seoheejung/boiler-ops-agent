@@ -10,7 +10,7 @@ const phase = process.env.E2E_PHASE ?? 'phase1';
 const out = resolve(root, 'artifacts/e2e', phase);
 mkdirSync(out, { recursive: true });
 const dataset = process.env.BOILER_DATASET_PATH ?? resolve(root, 'data/raw', readdirSync(resolve(root, 'data/raw')).find(file => file.endsWith('.csv')));
-const env = { ...process.env, PYTHONUTF8: '1', BOILER_DATASET_PATH: dataset, REPLAY_INTERVAL_MS: '250', STALE_AFTER_MS: '2000', KAFKA_BOOTSTRAP_SERVERS: '127.0.0.1:9092', KAFKA_TOPIC: `boiler.e2e.${Date.now()}` };
+const env = { ...process.env, PYTHONUTF8: '1', BOILER_DATASET_PATH: dataset, REPLAY_INTERVAL_MS: '250', STALE_AFTER_MS: '2000', KAFKA_BOOTSTRAP_SERVERS: '127.0.0.1:9092', KAFKA_TOPIC: `boiler.e2e.${Date.now()}`, OLLAMA_BASE_URL: process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434', OLLAMA_MODEL: process.env.OLLAMA_MODEL ?? 'qwen2.5-coder:7b', AGENT_TRACE_DIR: resolve(out, 'agent-traces') };
 const python = resolve(root, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
 const children = [];
 const checks = [];
@@ -132,6 +132,27 @@ try {
     await poll(async () => await page.getByTestId('target-delta-16').textContent() === delta.toLocaleString('en-US', { maximumFractionDigits: 3 }), 'actual vs target UI');
     writeFileSync(resolve(out, 'analysis.json'), JSON.stringify({ generation, reheater }, null, 2));
     pass('Aligned loop actual/target/controls, missing target and prior-only distribution');
+  }
+  if (Number(phase.replace('phase', '')) >= 4) {
+    const responsePromise = page.waitForResponse(response => response.url().endsWith('/api/agent/query'), { timeout: 360000 });
+    await page.getByRole('button', { name: 'Agent 조회', exact: true }).click();
+    const response = await responsePromise;
+    const answer = await response.json();
+    assert.equal(response.status(), 200, JSON.stringify(answer));
+    assert.equal(answer.equipment, 'feeders');
+    await page.getByTestId('agent-answer').waitFor();
+    const trace = await (await fetch(`http://127.0.0.1:8000/api/agent/traces/${answer.trace_id}`)).json();
+    for (const evidence of answer.evidence) {
+      const call = trace.calls.find(call => call.id === evidence.tool_id);
+      let value = call.result;
+      for (const key of evidence.path) value = value[key];
+      assert.equal(value, evidence.value);
+    }
+    assert.ok(trace.calls.every(call => call.equipment === 'feeders' && call.tool.startsWith('get_')));
+    assert.equal((await fetch('http://127.0.0.1:8000/api/tools/get_sensor_history?equipment=feeders&tag=unknown')).status, 422);
+    assert.equal((await fetch('http://127.0.0.1:8000/api/tools/write_valve?equipment=feeders')).status, 422);
+    writeFileSync(resolve(out, 'agent.json'), JSON.stringify({ answer, trace }, null, 2));
+    pass('Actual Ollama model chooses read tools and evidence; every numeric statement traces to tool result');
   }
   assert.deepEqual(errors, []);
   writeFileSync(resolve(out, 'telemetry.jsonl'), [...telemetry.values()].map(event => JSON.stringify(event)).join('\n') + '\n');
