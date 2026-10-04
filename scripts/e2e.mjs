@@ -1,0 +1,113 @@
+import { spawn, execFileSync } from 'node:child_process';
+import { mkdirSync, readdirSync, writeFileSync, createWriteStream } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import assert from 'node:assert/strict';
+import { chromium } from '../frontend/node_modules/playwright/index.mjs';
+
+const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
+const phase = process.env.E2E_PHASE ?? 'phase1';
+const out = resolve(root, 'artifacts/e2e', phase);
+mkdirSync(out, { recursive: true });
+const dataset = process.env.BOILER_DATASET_PATH ?? resolve(root, 'data/raw', readdirSync(resolve(root, 'data/raw')).find(file => file.endsWith('.csv')));
+const env = { ...process.env, PYTHONUTF8: '1', BOILER_DATASET_PATH: dataset, REPLAY_INTERVAL_MS: '250', STALE_AFTER_MS: '2000', KAFKA_BOOTSTRAP_SERVERS: '127.0.0.1:9092', KAFKA_TOPIC: `boiler.e2e.${Date.now()}` };
+const python = resolve(root, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+const children = [];
+const checks = [];
+let browser;
+let page;
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+function start(command, args, name, cwd = root) {
+  const log = createWriteStream(resolve(out, `${name}.log`));
+  const child = spawn(command, args, { cwd, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  child.stdout.pipe(log); child.stderr.pipe(log); children.push(child); return child;
+}
+async function poll(fn, label, timeout = 30000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) { try { if (await fn()) return; } catch {} await delay(150); }
+  throw new Error(`Timed out: ${label}`);
+}
+function pass(name) { checks.push({ name, passed: true }); console.log(`PASS ${name}`); }
+const result = { phase, started_at: new Date().toISOString(), checks, topic: env.KAFKA_TOPIC };
+try {
+  const profile = JSON.parse(execFileSync(python, ['-m', 'scripts.dataset_profile'], { cwd: root, env, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 }));
+  writeFileSync(resolve(out, 'input.json'), JSON.stringify(profile, null, 2));
+  result.input_sha256 = profile.sha256;
+  const apiArgs = ['-m', 'uvicorn', 'backend.app.main:app', '--host', '127.0.0.1', '--port', '8000'];
+  const backend = start(python, apiArgs, 'backend');
+  start(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4173', '--strictPort'], 'frontend', resolve(root, 'frontend'));
+  await poll(async () => (await (await fetch('http://127.0.0.1:8000/api/health')).json()).kafka === 'CONNECTED', 'Kafka consumer readiness');
+  await poll(async () => (await fetch('http://127.0.0.1:4173')).ok, 'frontend readiness');
+  browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  const context = await browser.newContext({ viewport: { width: 1500, height: 1100 } });
+  page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const telemetry = new Map();
+  page.on('websocket', ws => ws.on('framereceived', ({ payload }) => {
+    const event = JSON.parse(payload.toString());
+    if (event.current) telemetry.set(`${event.current.run_id}:${event.current.sequence}`, event.current);
+  }));
+  await page.goto('http://127.0.0.1:4173');
+  await poll(async () => await page.getByTestId('ws-status').textContent() === 'CONNECTED', 'WebSocket connected');
+  start(python, ['-m', 'backend.app.replay.producer', '--limit', '16'], 'producer');
+  await poll(async () => Number(await page.getByTestId('sequence').textContent()) >= 4, 'live UI');
+  assert.match(await page.getByTestId('stream-status').textContent(), /LIVE/);
+  await page.screenshot({ path: resolve(out, 'dashboard.png'), fullPage: true });
+  await poll(async () => await page.getByTestId('sequence').textContent() === '16', 'final sequence');
+  const expected = profile.first_rows[15];
+  for (const row of profile.first_rows) {
+    const actual = [...telemetry.values()].find(event => event.sequence === row.sequence);
+    assert.ok(actual, `WebSocket sequence ${row.sequence}`);
+    assert.equal(actual.source_time, row.source_time);
+    for (const [tag, raw] of Object.entries(row.measurements)) {
+      assert.equal(actual.sensors[tag].raw, raw, tag);
+      assert.equal(actual.sensors[tag].value, raw.trim() === '' ? null : Number(raw), tag);
+    }
+  }
+  pass('CSV → Kafka → FastAPI → WebSocket: all 16 rows, exact tags, source times and values');
+  assert.equal(await page.getByTestId('source-time').textContent(), expected.source_time);
+  assert.equal(await page.getByTestId('kpi-실제 출력값').textContent(), Number(expected.measurements['실제 출력값']).toLocaleString('en-US'));
+  const marker = page.getByTestId('marker-총 주증기 유량');
+  await marker.click();
+  assert.equal(await page.getByTestId('inspector-tag').textContent(), '총 주증기 유량');
+  assert.equal(await page.getByTestId('inspector-value').textContent(), Number(expected.measurements['총 주증기 유량']).toLocaleString('en-US'));
+  assert.ok((await marker.textContent()).includes(await page.getByTestId('inspector-value').textContent()));
+  assert.equal(await page.getByTestId('inspector-time').textContent(), expected.source_time);
+  await page.screenshot({ path: resolve(out, 'selected-sensor.png'), fullPage: true });
+  pass('KPI, Scene marker, selected Inspector and operations feed agree');
+  await poll(async () => (await page.getByTestId('stream-status').textContent()).includes('STALE'), 'stale visible', 10000);
+  pass('Replay end displays STALE');
+  backend.kill();
+  await poll(async () => await page.getByTestId('ws-status').textContent() !== 'CONNECTED', 'disconnected', 10000);
+  start(python, apiArgs, 'backend-restarted');
+  await poll(async () => await page.getByTestId('ws-status').textContent() === 'CONNECTED', 'reconnected');
+  await poll(async () => await page.getByTestId('sequence').textContent() === '16', 'recovered state');
+  pass('WebSocket disconnect/reconnect preserves latest state');
+  const fallback = await context.newPage();
+  await fallback.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function(type, ...args) {
+      if (String(type).includes('webgl')) return null;
+      return original.call(this, type, ...args);
+    };
+  });
+  await fallback.goto('http://127.0.0.1:4173');
+  await fallback.getByText('3D VIEW UNAVAILABLE').waitFor();
+  await fallback.getByRole('button', { name: '02 Furnace', exact: true }).click();
+  await fallback.getByTestId('inspector-tag').waitFor();
+  await fallback.screenshot({ path: resolve(out, 'fallback.png'), fullPage: true });
+  pass('WebGL unavailable retains selectable equipment and live values');
+  assert.deepEqual(errors, []);
+  writeFileSync(resolve(out, 'telemetry.jsonl'), [...telemetry.values()].map(event => JSON.stringify(event)).join('\n') + '\n');
+  result.passed = true;
+} catch (error) {
+  result.passed = false; result.error = String(error.stack ?? error);
+  if (page) await page.screenshot({ path: resolve(out, 'failure.png'), fullPage: true }).catch(() => {});
+  console.error(error); process.exitCode = 1;
+} finally {
+  result.finished_at = new Date().toISOString();
+  writeFileSync(resolve(out, 'run.json'), JSON.stringify(result, null, 2));
+  await browser?.close();
+  for (const child of children.reverse()) child.kill();
+}
