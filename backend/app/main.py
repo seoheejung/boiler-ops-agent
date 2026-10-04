@@ -3,7 +3,7 @@ import json
 from uuid import UUID
 from contextlib import asynccontextmanager, suppress
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Header
 
 from backend.app.config import Settings
 from backend.app.domain.registry import EQUIPMENT, PROCESS_FLOWS, make_registry
@@ -12,6 +12,7 @@ from backend.app.domain.analysis import loop_analysis, sensor_summary
 from backend.app.agent.tools import ReadTools
 from backend.app.agent.service import AgentQuery, AgentFailure, query_agent, trace_directory
 from backend.app.forecast.service import forecast
+from backend.app.simulator.service import Simulator, SimulatorError, ProposalRequest, Decision
 from backend.app.replay.csv_source import columns
 from backend.app.streaming.consumer import consume
 from backend.app.websocket.hub import Hub
@@ -23,6 +24,7 @@ async def lifespan(app):
     registry = make_registry([tag for tag in columns(settings) if tag != settings.time_column])
     app.state.boiler = BoilerState(registry, settings)
     app.state.hub = Hub()
+    app.state.simulator = Simulator()
     task = asyncio.create_task(consume(settings, app.state.boiler, app.state.hub))
     yield
     task.cancel()
@@ -110,6 +112,34 @@ async def agent_trace(trace_id: UUID):
     if not path.is_file():
         raise HTTPException(404, "Trace not found")
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+@app.get("/api/simulator")
+async def simulator_state():
+    return app.state.simulator.snapshot()
+
+
+@app.get("/api/simulator/audit")
+async def simulator_audit():
+    return app.state.simulator.audit_log()
+
+
+@app.post("/api/simulator/proposals")
+async def simulator_propose(request: ProposalRequest):
+    try:
+        return await asyncio.to_thread(app.state.simulator.propose, request)
+    except SimulatorError as error:
+        raise HTTPException(error.status, str(error)) from error
+    except (ValueError, OSError, KeyError) as error:
+        raise HTTPException(503, f"Simulator recommendation failed: {type(error).__name__}: {error}") from error
+
+
+@app.post("/api/simulator/proposals/{proposal_id}/decision")
+async def simulator_decide(proposal_id: UUID, decision: Decision, authorization: str | None = Header(default=None)):
+    try:
+        return app.state.simulator.decide(proposal_id, decision, authorization)
+    except SimulatorError as error:
+        raise HTTPException(error.status, str(error)) from error
 
 
 @app.websocket("/api/ws")

@@ -4,7 +4,7 @@
 
 ## 현재 상태
 
-Phase 1~5 구현 및 실제 Kafka/Chromium/Ollama E2E 통과. 다음 작업은 Phase 6.
+Phase 1~6 구현 및 실제 Kafka/Chromium/Ollama E2E 통과. 다음 작업은 Phase 7 통합 실패 경로 검증.
 
 | Phase | 상태 | 내용 |
 | --- | --- | --- |
@@ -13,7 +13,7 @@ Phase 1~5 구현 및 실제 Kafka/Chromium/Ollama E2E 통과. 다음 작업은 P
 | 3 | 검증 완료 | 실제·목표·제어값 비교, 변화율, 분포 편차 |
 | 4 | 검증 완료 | 검증된 Read Tool과 수치 근거 Trace를 사용하는 로컬 AI Agent |
 | 5 | 검증 완료 | 5분 온도 예측, 시간순 평가, Agent 예측 조회 |
-| 6 | 예정 | 명시적 승인 후 로컬 Simulator 변경 |
+| 6 | 검증 완료 | 명시적 인증·승인 후 로컬 Simulator 변경, SQLite Audit |
 | 7 | 예정 | 통합 실패 경로 E2E |
 
 ## 실행
@@ -47,7 +47,7 @@ npm.cmd run build --prefix frontend
 cd frontend
 npx.cmd playwright install chromium
 cd ..
-$env:E2E_PHASE = 'phase5'
+$env:E2E_PHASE = 'phase6'
 node scripts/e2e.mjs
 ```
 
@@ -72,6 +72,15 @@ uv run python -m backend.app.forecast.train
 모델 추론을 보려면 `REPLAY_START_ROW=42841`로 시험 구간을 재생한다. 모델 cutoff 이전 추론은 거부한다.
 검증 MAE로 선택된 선형 모델은 시험 MAE 0.105784로 Naive 0.033211보다 나빴다.
 현재 예측은 실험·평가용이며 단위와 제어 효과는 미확인이다. 자세한 결과는 `docs/results/phase5-temperature-forecast.md` 참고.
+
+## 승인 기반 Simulator
+
+Simulator는 승인 절차를 확인하는 `demo_bias` 상태 머신이며 물리 발전설비 모델이 아니다.
+재열기 Agent 조회 후 별도 Control Panel에서 데모 변경을 제안하고, 값을 검토한 뒤 승인 또는 거절한다.
+`SIMULATOR_APPROVAL_TOKEN`에 최소 32자의 임의 운영자 자격을 설정해야 승인이 활성화된다.
+실제 자격 값은 Git·로그·결과 문서에 넣지 않는다. E2E는 임시 자격을 메모리에서 생성한다.
+상태·제안·승인·실행 Audit는 `SIMULATOR_DB_PATH`에 보존한다.
+제안은 5분 동안 유효하며 revision이 달라지거나 이미 결정된 제안은 실행하지 않는다.
 
 ## 데이터의 한계
 

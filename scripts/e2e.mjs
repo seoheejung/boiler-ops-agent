@@ -3,6 +3,7 @@ import { mkdirSync, readdirSync, writeFileSync, createWriteStream } from 'node:f
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import { chromium } from '../frontend/node_modules/playwright/index.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -12,6 +13,10 @@ mkdirSync(out, { recursive: true });
 const dataset = process.env.BOILER_DATASET_PATH ?? resolve(root, 'data/raw', readdirSync(resolve(root, 'data/raw')).find(file => file.endsWith('.csv')));
 const env = { ...process.env, PYTHONUTF8: '1', BOILER_DATASET_PATH: dataset, REPLAY_INTERVAL_MS: '250', STALE_AFTER_MS: '2000', KAFKA_BOOTSTRAP_SERVERS: '127.0.0.1:9092', KAFKA_TOPIC: `boiler.e2e.${Date.now()}`, OLLAMA_BASE_URL: process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434', OLLAMA_MODEL: process.env.OLLAMA_MODEL ?? 'qwen2.5-coder:7b', AGENT_TRACE_DIR: resolve(out, 'agent-traces') };
 const python = resolve(root, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+if (Number(phase.replace('phase', '')) >= 6) {
+  env.SIMULATOR_APPROVAL_TOKEN = randomBytes(32).toString('hex');
+  env.SIMULATOR_DB_PATH = resolve(out, `simulator-${Date.now()}.sqlite`);
+}
 const children = [];
 const checks = [];
 let browser;
@@ -187,6 +192,42 @@ try {
     writeFileSync(resolve(out, 'advisory-agent.json'), JSON.stringify({ advisory, advisoryTrace }, null, 2));
     writeFileSync(resolve(out, 'forecast.json'), JSON.stringify({ model: forecastModel, forecast }, null, 2));
     pass('Chronological train/validation/test, baseline MAE/RMSE, held-out forecast UI and Agent read tool');
+  }
+  if (Number(phase.replace('phase', '')) >= 6) {
+    const stateBefore = await (await fetch('http://127.0.0.1:8000/api/simulator')).json();
+    const proposalResponse = page.waitForResponse(response => response.url().endsWith('/api/simulator/proposals'), { timeout: 180000 });
+    await page.getByRole('button', { name: 'Agent Simulator 제안 생성', exact: true }).click();
+    const created = await proposalResponse;
+    const proposal = await created.json();
+    assert.equal(created.status(), 200, JSON.stringify(proposal));
+    assert.equal(proposal.requested_value, 1);
+    assert.equal((await (await fetch('http://127.0.0.1:8000/api/simulator')).json()).value, stateBefore.value);
+    const decisionUrl = `http://127.0.0.1:8000/api/simulator/proposals/${proposal.id}/decision`;
+    const decision = { approve: true, confirm: true, expected_revision: proposal.expected_revision };
+    assert.equal((await fetch(decisionUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(decision) })).status, 401);
+    await page.getByLabel('로컬 운영자 승인 토큰', { exact: true }).fill(env.SIMULATOR_APPROVAL_TOKEN);
+    await page.getByRole('checkbox').check();
+    await page.getByRole('button', { name: '승인 및 Simulator 실행', exact: true }).click();
+    await poll(async () => await page.getByTestId('proposal-status').textContent() === 'executed', 'approved execution');
+    assert.equal(await page.getByTestId('sim-value').textContent(), '1');
+    const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${env.SIMULATOR_APPROVAL_TOKEN}` };
+    assert.equal((await fetch(decisionUrl, { method: 'POST', headers, body: JSON.stringify(decision) })).status, 409);
+    const rejectResponse = page.waitForResponse(response => response.url().endsWith('/api/simulator/proposals'), { timeout: 180000 });
+    await page.getByRole('button', { name: 'Agent Simulator 제안 생성', exact: true }).click();
+    const rejectedProposal = await (await rejectResponse).json();
+    await page.getByLabel('로컬 운영자 승인 토큰', { exact: true }).fill(env.SIMULATOR_APPROVAL_TOKEN);
+    await page.getByRole('checkbox').check();
+    await page.getByRole('button', { name: '거절', exact: true }).click();
+    await poll(async () => await page.getByTestId('proposal-status').textContent() === 'rejected', 'rejected proposal');
+    assert.equal(await page.getByTestId('sim-value').textContent(), '1');
+    assert.equal((await fetch(`http://127.0.0.1:8000/api/simulator/proposals/${rejectedProposal.id}/decision`, { method: 'POST', headers, body: JSON.stringify({ ...decision, expected_revision: 1 }) })).status, 409);
+    const audit = await (await fetch('http://127.0.0.1:8000/api/simulator/audit')).json();
+    const executions = audit.filter(row => row.event === 'executed');
+    assert.equal(executions.length, 1);
+    assert.ok(audit.some(row => row.event === 'approved' && row.proposal_id === executions[0].proposal_id));
+    writeFileSync(resolve(out, 'simulator-audit.json'), JSON.stringify(audit, null, 2));
+    await page.screenshot({ path: resolve(out, 'simulator-decision.png'), fullPage: true });
+    pass('Real model proposal, authenticated explicit browser approval, immutable decision, rejection and complete write audit');
   }
   assert.deepEqual(errors, []);
   writeFileSync(resolve(out, 'telemetry.jsonl'), [...telemetry.values()].map(event => JSON.stringify(event)).join('\n') + '\n');
