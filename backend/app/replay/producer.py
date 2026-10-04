@@ -19,9 +19,12 @@ async def replay(limit: int | None = None):
     run_id = str(uuid.uuid4())
     await producer.start()
     try:
-        for sequence, source_time, measurements in rows(settings):
+        for source_row, source_time, measurements in rows(settings):
+            if source_row < settings.start_row:
+                continue
+            sequence = source_row - settings.start_row + 1
             event = {"run_id": run_id, "sequence": sequence, "source_time": source_time,
-                     "emitted_at": datetime.now(UTC).isoformat(), "measurements": measurements}
+                     "source_row": source_row, "emitted_at": datetime.now(UTC).isoformat(), "measurements": measurements}
             await producer.send_and_wait(settings.topic, event, partition=0)
             print(json.dumps({key: event[key] for key in ("run_id", "sequence", "source_time")}), flush=True)
             if limit is not None and sequence >= limit:

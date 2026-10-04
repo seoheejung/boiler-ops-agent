@@ -15,6 +15,7 @@ class Settings:
     time_column: str
     stale_ms: int
     history_limit: int
+    start_row: int
 
     @classmethod
     def load(cls):
@@ -26,10 +27,13 @@ class Settings:
         interval = int(os.environ["REPLAY_INTERVAL_MS"])
         stale = int(os.getenv("STALE_AFTER_MS", str(max(5000, interval * 3))))
         history = int(os.getenv("HISTORY_LIMIT", "3600"))
+        start_row = int(os.getenv("REPLAY_START_ROW", "1"))
+        if start_row < 1:
+            raise ValueError("REPLAY_START_ROW must be positive")
         if interval < 1 or stale <= interval or not 10 <= history <= 100000:
             raise ValueError("Require interval >= 1, stale > interval, history in [10, 100000]")
         path = Path(os.environ["BOILER_DATASET_PATH"])
         if not path.is_file():
             raise ValueError(f"Dataset file does not exist: {path}")
         return cls(path, interval, os.environ["KAFKA_BOOTSTRAP_SERVERS"], os.environ["KAFKA_TOPIC"],
-                   os.getenv("CSV_ENCODING", "utf-8-sig"), os.getenv("CSV_TIME_COLUMN", "일자"), stale, history)
+                   os.getenv("CSV_ENCODING", "utf-8-sig"), os.getenv("CSV_TIME_COLUMN", "일자"), stale, history, start_row)

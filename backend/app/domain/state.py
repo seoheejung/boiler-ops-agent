@@ -64,6 +64,7 @@ class BoilerState:
                 self.retired_runs.add(self.current["run_id"])
             self.history.clear()
         self.current = {"run_id": run_id, "sequence": sequence, "source_time": source_time,
+                        "source_row": event.get("source_row"),
                         "emitted_at": emitted_at, "kafka_offset": offset, "sensors": sensors}
         self.history.append(self.current)
         self.received_at = time.monotonic()

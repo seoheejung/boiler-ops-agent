@@ -11,6 +11,7 @@ from backend.app.domain.state import BoilerState
 from backend.app.domain.analysis import loop_analysis, sensor_summary
 from backend.app.agent.tools import ReadTools
 from backend.app.agent.service import AgentQuery, AgentFailure, query_agent, trace_directory
+from backend.app.forecast.service import forecast
 from backend.app.replay.csv_source import columns
 from backend.app.streaming.consumer import consume
 from backend.app.websocket.hub import Hub
@@ -74,6 +75,14 @@ async def analysis_sensor(tag: str):
         return sensor_summary(app.state.boiler, tag)
     except ValueError as error:
         raise HTTPException(404, str(error)) from error
+
+
+@app.get("/api/forecast")
+async def temperature_forecast():
+    try:
+        return forecast(app.state.boiler)
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
 
 
 @app.get("/api/tools/{name}")

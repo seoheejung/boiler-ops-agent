@@ -18,8 +18,8 @@ def profile():
         count += 1
         start = start or source_time
         end = source_time
-        if sequence <= 16:
-            first.append({"sequence": sequence, "source_time": source_time, "measurements": measurements})
+        if settings.start_row <= sequence < settings.start_row + 16:
+            first.append({"sequence": sequence - settings.start_row + 1, "source_row": sequence, "source_time": source_time, "measurements": measurements})
         for tag, raw in measurements.items():
             if not raw.strip():
                 missing[tag] += 1

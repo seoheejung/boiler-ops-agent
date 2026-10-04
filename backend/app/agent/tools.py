@@ -1,8 +1,9 @@
 from types import SimpleNamespace
 
 from backend.app.domain.analysis import sensor_summary
+from backend.app.forecast.service import forecast
 
-TOOL_NAMES = ("get_boiler_status", "get_equipment_status", "get_sensor_history", "get_operating_targets", "get_current_controls", "get_deviation_summary")
+TOOL_NAMES = ("get_boiler_status", "get_equipment_status", "get_sensor_history", "get_operating_targets", "get_current_controls", "get_deviation_summary", "get_temperature_forecast")
 
 
 class ReadTools:
@@ -16,7 +17,7 @@ class ReadTools:
         self.equipment = equipment
         self.tag = tag or self.tags[0]
         self.snapshot = state.snapshot()
-        self.state = SimpleNamespace(registry=state.registry, current=state.current, history=tuple(state.history))
+        self.state = SimpleNamespace(registry=state.registry, current=state.current, history=tuple(state.history), snapshot=lambda: self.snapshot)
 
     def call(self, name):
         if name not in TOOL_NAMES:
@@ -25,6 +26,10 @@ class ReadTools:
             return {key: self.snapshot[key] for key in ("status", "kafka", "stale", "error", "rejected_events")}
         if self.state.current is None:
             raise ValueError("No telemetry available")
+        if name == "get_temperature_forecast":
+            if self.equipment != "reheater":
+                raise ValueError("Forecast only supports the selected reheater equipment")
+            return forecast(self.state)
         if name == "get_sensor_history":
             return {"equipment": self.equipment, "tag": self.tag, "points": [
                 {"source_time": event["source_time"], **event["sensors"][self.tag]} for event in self.state.history[-30:]]}

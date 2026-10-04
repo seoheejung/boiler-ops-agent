@@ -22,7 +22,7 @@ class AgentQuery(BaseModel):
 
 class ToolPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    tools: list[Literal["get_boiler_status", "get_equipment_status", "get_sensor_history", "get_operating_targets", "get_current_controls", "get_deviation_summary"]] = Field(min_length=1, max_length=4)
+    tools: list[Literal["get_boiler_status", "get_equipment_status", "get_sensor_history", "get_operating_targets", "get_current_controls", "get_deviation_summary", "get_temperature_forecast"]] = Field(min_length=1, max_length=4)
 
 
 class Findings(BaseModel):
@@ -64,7 +64,7 @@ def query_agent(request, tools):
              "model": os.getenv("OLLAMA_MODEL"), "calls": [], "evidence": [], "snapshot_status": tools.snapshot["status"]}
     try:
         plan = ToolPlan.model_validate(model_json([
-            {"role": "system", "content": "Choose read-only boiler tools relevant to the question. The equipment is fixed by the application. Never request writes. Return tools in JSON. Tools: " + ', '.join(TOOL_NAMES)},
+            {"role": "system", "content": "Choose read-only boiler tools relevant to the question. The equipment is fixed by the application. get_temperature_forecast is only available for reheater. Never request writes. Return tools in JSON. Tools: " + ', '.join(TOOL_NAMES)},
             {"role": "user", "content": json.dumps(request.model_dump(), ensure_ascii=False)}], ToolPlan.model_json_schema()))
         names = list(dict.fromkeys(["get_equipment_status", *plan.tools]))
         for name in names:
@@ -80,6 +80,10 @@ def query_agent(request, tools):
                 for field in ("current", "rate_per_source_minute", "baseline_mean", "z_score"):
                     trace["evidence"].append({"id": f"e{len(trace['evidence']) + 1}", "tool_id": call_id,
                         "path": [field], "tag": result["tag"], "field": field, "value": result[field]})
+            if name == "get_temperature_forecast":
+                for field in ("input_value", "prediction", "horizon_minutes"):
+                    trace["evidence"].append({"id": f"e{len(trace['evidence']) + 1}", "tool_id": call_id,
+                        "path": [field], "tag": result["target"], "field": field, "value": result[field]})
         candidates = trace["evidence"]
         if not candidates:
             raise ValueError("No traceable evidence returned by read tools")

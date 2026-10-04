@@ -30,6 +30,12 @@ async function poll(fn, label, timeout = 30000) {
 function pass(name) { checks.push({ name, passed: true }); console.log(`PASS ${name}`); }
 const result = { phase, started_at: new Date().toISOString(), checks, topic: env.KAFKA_TOPIC };
 try {
+  let forecastModel;
+  if (Number(phase.replace('phase', '')) >= 5) {
+    env.FORECAST_MODEL_PATH = resolve(out, 'forecast-model.json');
+    forecastModel = JSON.parse(execFileSync(python, ['-m', 'backend.app.forecast.train'], { cwd: root, env, encoding: 'utf8', maxBuffer: 1024 * 1024 }));
+    env.REPLAY_START_ROW = String(forecastModel.test_start_row);
+  }
   const profile = JSON.parse(execFileSync(python, ['-m', 'scripts.dataset_profile'], { cwd: root, env, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 }));
   writeFileSync(resolve(out, 'input.json'), JSON.stringify(profile, null, 2));
   result.input_sha256 = profile.sha256;
@@ -153,6 +159,34 @@ try {
     assert.equal((await fetch('http://127.0.0.1:8000/api/tools/write_valve?equipment=feeders')).status, 422);
     writeFileSync(resolve(out, 'agent.json'), JSON.stringify({ answer, trace }, null, 2));
     pass('Actual Ollama model chooses read tools and evidence; every numeric statement traces to tool result');
+  }
+  if (Number(phase.replace('phase', '')) >= 5) {
+    const response = await fetch('http://127.0.0.1:8000/api/forecast');
+    const forecast = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(forecast));
+    assert.equal(forecast.horizon_minutes, 5);
+    const x = Number(expected.measurements[forecastModel.target]);
+    assert.equal(forecast.prediction, forecastModel.selected === 'naive' ? x : forecastModel.intercept + forecastModel.slope * x);
+    assert.equal(forecast.dataset_sha256, profile.sha256);
+    assert.ok(Date.parse(forecast.source_time) > Date.parse(forecast.validation_cutoff));
+    assert.ok(forecastModel.test.naive.samples > 7000);
+    assert.ok(Number.isFinite(forecastModel.test.linear_ar.rmse));
+    assert.equal(await page.getByTestId('forecast-value').textContent(), forecast.prediction.toFixed(2));
+    const tool = await (await fetch('http://127.0.0.1:8000/api/tools/get_temperature_forecast?equipment=reheater')).json();
+    assert.equal(tool.prediction, forecast.prediction);
+    await page.getByRole('button', { name: '센서 최종재열기 입구 온도 평균값', exact: true }).click();
+    await page.getByLabel('질문', { exact: true }).fill('Use get_temperature_forecast to report the 5-minute predicted temperature. Cite prediction evidence.');
+    const agentResponse = page.waitForResponse(response => response.url().endsWith('/api/agent/query'), { timeout: 360000 });
+    await page.getByRole('button', { name: 'Agent 조회', exact: true }).click();
+    const agent = await agentResponse;
+    const advisory = await agent.json();
+    assert.equal(agent.status(), 200, JSON.stringify(advisory));
+    const advisoryTrace = await (await fetch(`http://127.0.0.1:8000/api/agent/traces/${advisory.trace_id}`)).json();
+    assert.ok(advisoryTrace.calls.some(call => call.tool === 'get_temperature_forecast'));
+    assert.ok(advisory.evidence.some(evidence => evidence.field === 'prediction' && evidence.value === forecast.prediction));
+    writeFileSync(resolve(out, 'advisory-agent.json'), JSON.stringify({ advisory, advisoryTrace }, null, 2));
+    writeFileSync(resolve(out, 'forecast.json'), JSON.stringify({ model: forecastModel, forecast }, null, 2));
+    pass('Chronological train/validation/test, baseline MAE/RMSE, held-out forecast UI and Agent read tool');
   }
   assert.deepEqual(errors, []);
   writeFileSync(resolve(out, 'telemetry.jsonl'), [...telemetry.values()].map(event => JSON.stringify(event)).join('\n') + '\n');
