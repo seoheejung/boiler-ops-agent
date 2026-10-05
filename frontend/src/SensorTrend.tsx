@@ -1,3 +1,4 @@
+import { apiFetch } from './session';
 import { useEffect, useId, useState } from 'react';
 import { useTelemetry } from './telemetry';
 
@@ -9,7 +10,7 @@ export function SensorTrend({ tag }: { tag: string }) {
   const telemetry = useTelemetry();
   useEffect(() => {
     const controller = new AbortController();
-    fetch(`/api/sensors/history?tag=${encodeURIComponent(tag)}`, { signal: controller.signal }).then(response => { if (!response.ok) throw new Error(`History HTTP ${response.status}`); return response.json(); })
+    apiFetch(`/api/sensors/history?tag=${encodeURIComponent(tag)}`, { signal: controller.signal }).then(response => { if (!response.ok) throw new Error(`History HTTP ${response.status}`); return response.json(); })
       .then(data => { setPoints(data.points); setError(null); }).catch(error => { if (error.name !== 'AbortError') setError(String(error)); });
     return () => controller.abort();
   }, [tag, telemetry.current?.run_id, telemetry.current?.sequence]);

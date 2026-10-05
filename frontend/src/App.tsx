@@ -1,3 +1,5 @@
+import { useSession } from './session';
+import { apiFetch } from './session';
 import { useCallback, useEffect, useState } from 'react';
 import { BoilerViewport } from './BoilerScene';
 import { connectTelemetry, formatValue, toggleUpdates, usePaused, useConnection, useEvents, useReading, useTelemetry } from './telemetry';
@@ -19,6 +21,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
+  const { user, logout } = useSession();
   const [agentTrace, setAgentTrace] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const paused = usePaused();
@@ -28,7 +31,7 @@ export default function App() {
   useEffect(() => connectTelemetry(), []);
   useEffect(() => {
     const controller = new AbortController();
-    fetch('/api/registry', { signal: controller.signal }).then(response => { if (!response.ok) throw new Error(`Registry HTTP ${response.status}`); return response.json(); })
+    apiFetch('/api/registry', { signal: controller.signal }).then(response => { if (!response.ok) throw new Error(`Registry HTTP ${response.status}`); return response.json(); })
       .then(validateRegistry).then(setRegistry).catch(error => { if (error.name !== 'AbortError') setError(String(error)); });
     return () => controller.abort();
   }, []);
@@ -39,10 +42,11 @@ export default function App() {
   const sensor = selected ? registry?.sensors[selected] : null;
   const reading = selected ? telemetry.current?.sensors[selected] : null;
   const kpis = ['실제 출력값', '목표 발전량', '총 주증기 유량', '터빈용 주증기 압력', '최종과열기 출구 온도 평균값', '배기가스 산소 중간값'].flatMap(tag => registry?.sensors[tag] ? [registry.sensors[tag]] : []);
+  useEffect(() => { setAgentTrace(null); }, [sensor?.tag]);
   const status = connection !== 'CONNECTED' ? connection : telemetry.status;
   return <div className="app-shell">
     <a className="skip-link" href="#main">본문으로 건너뛰기</a>
-    <header className="topbar"><a href="/" className="brand" aria-label="BoilerOps Agent 홈"><span className="brand-mark" aria-hidden="true">B</span>BoilerOps <span>AGENT</span></a><div className="workspace-label">OPERATIONS WORKSPACE <b>한국중부발전 · 공개 운전데이터</b></div><span className={`status ${status.toLowerCase()}`} data-testid="stream-status" role="status">● {status}</span><button id="menu-toggle" className="menu-toggle" aria-expanded={menuOpen} aria-controls="page-nav" onClick={() => setMenuOpen(!menuOpen)}>메뉴</button></header>
+    <header className="topbar"><a href="/" className="brand" aria-label="BoilerOps Agent 홈"><span className="brand-mark" aria-hidden="true">B</span>BoilerOps <span>AGENT</span></a><div className="workspace-label">OPERATIONS WORKSPACE <b>한국중부발전 · 공개 운전데이터</b></div><span className={`status ${status.toLowerCase()}`} data-testid="stream-status" role="status">● {status}</span><button className="session-logout" onClick={logout}>{user.user_id} · 로그아웃</button><button id="menu-toggle" className="menu-toggle" aria-expanded={menuOpen} aria-controls="page-nav" onClick={() => setMenuOpen(!menuOpen)}>메뉴</button></header>
     <nav id="page-nav" className={`page-nav ${menuOpen ? 'open' : ''}`} aria-label="페이지 메뉴" onKeyDown={event => { if (event.key === 'Escape') { setMenuOpen(false); document.getElementById('menu-toggle')?.focus(); } }}>
       {[['monitoring', '모니터링'], ['analysis', '운전 분석'], ['forecast', '온도 예측'], ['agent', 'AI Agent'], ['simulator', 'Simulator']].map(([id, label]) => <a key={id} href={`#${id}`} onClick={() => { setMenuOpen(false); document.getElementById(id)?.focus(); }}>{label}</a>)}
     </nav>
@@ -67,7 +71,7 @@ export default function App() {
     <section className="feed panel"><div className="panel-heading"><div><span className="eyebrow">LIVE OPERATIONS</span><h2>Telemetry activity</h2></div><div className="source-stamp"><span data-testid="source-time">{telemetry.current?.source_time ?? '데이터 대기'}</span><b>SEQ <span data-testid="sequence">{telemetry.current?.sequence ?? '—'}</span></b></div></div><div className="feed-rows">{events.slice(-5).reverse().map(event => <div key={`${event.run_id}-${event.sequence}`} className="feed-row"><span>● TELEMETRY</span><time>{event.source_time}</time><span>실제 출력값 <b>{formatValue(event.sensors['실제 출력값'])}</b></span><span>과열기 출구 <b>{formatValue(event.sensors['최종과열기 출구 온도 평균값'])}</b></span><code>#{event.sequence}</code></div>)}{events.length === 0 && <p className="quiet">Kafka에서 첫 이벤트를 기다리고 있습니다.</p>}</div></section>
     <OperationsAnalysis />
     <ForecastPanel />
-    <AgentPanel key={sensor?.equipment ?? 'none'} equipment={sensor?.equipment ?? null} tag={sensor?.tag ?? null} onTrace={setAgentTrace} />
+    <AgentPanel key={sensor?.tag ?? 'none'} equipment={sensor?.equipment ?? null} tag={sensor?.tag ?? null} onTrace={setAgentTrace} />
     <SimulatorPanel agentTrace={sensor?.equipment === 'reheater' ? agentTrace : null} />
     </main>
     <footer><span>© {new Date().getFullYear()} BoilerOps Agent · 공개 데이터 재생</span><a href="#main">본문 처음으로</a><a href="#simulator">Simulator 승인 안내</a><span>관측 데이터 · 산업 안전 판정 없음</span></footer>

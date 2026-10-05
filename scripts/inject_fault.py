@@ -7,9 +7,10 @@ import sqlite3
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from aiokafka import AIOKafkaProducer
+from backend.app.streaming.security import kafka_options
 
 from backend.app.config import Settings
 from backend.app.replay.csv_source import rows, columns
@@ -17,7 +18,7 @@ from backend.app.replay.csv_source import rows, columns
 
 async def telemetry_fault(mode):
     settings = Settings.load()
-    with urlopen('http://127.0.0.1:8000/api/state') as response:
+    with urlopen(Request('http://127.0.0.1:8000/api/state', headers={'Cookie': os.environ['E2E_SESSION_COOKIE']})) as response:
         state = json.load(response)['current']
     next_row = state['source_row'] + 1
     source = next(row for row in rows(settings) if row[0] == next_row)
@@ -32,7 +33,7 @@ async def telemetry_fault(mode):
         event['sequence'] = state['sequence'] - 1
     elif mode == 'tag':
         event['measurements']['UNKNOWN_SENSOR'] = '42'
-    producer = AIOKafkaProducer(bootstrap_servers=settings.brokers, request_timeout_ms=10000)
+    producer = AIOKafkaProducer(bootstrap_servers=settings.brokers, **kafka_options("producer", settings.brokers), request_timeout_ms=10000)
     await producer.start()
     try:
         await producer.send_and_wait(settings.topic, json.dumps(event, ensure_ascii=False).encode(), partition=0)

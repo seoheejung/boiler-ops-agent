@@ -1,3 +1,4 @@
+import { apiFetch } from './session';
 import { useEffect, useState } from 'react';
 import { useTelemetry } from './telemetry';
 
@@ -10,7 +11,7 @@ export function OperationsAnalysis() {
   const telemetry = useTelemetry();
   useEffect(() => {
     const controller = new AbortController();
-    fetch(`/api/analysis/loop?name=${loop}`, { signal: controller.signal }).then(response => { if (!response.ok) throw new Error(`Analysis HTTP ${response.status}`); return response.json(); })
+    apiFetch(`/api/analysis/loop?name=${loop}`, { signal: controller.signal }).then(response => { if (!response.ok) throw new Error(`Analysis HTTP ${response.status}`); return response.json(); })
       .then(data => { setData(data); setError(null); }).catch(error => { if (error.name !== 'AbortError') setError(String(error)); });
     return () => controller.abort();
   }, [loop, telemetry.current?.run_id, telemetry.current?.sequence]);

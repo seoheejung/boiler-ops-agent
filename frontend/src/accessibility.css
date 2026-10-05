@@ -95,3 +95,9 @@ footer a { display: inline-flex; align-items: center; text-decoration: underline
   .proposal { padding: 12px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }
+
+.login-page { width: min(100% - 32px, 520px); margin: 8vh auto; }
+.login-form { padding: 28px; margin-top: 24px; display: grid; gap: 16px; }
+.login-form input { width: 100%; min-width: 0; padding: 12px; background: #121b27; color: #f5f7fa; border: 1px solid #778699; border-radius: 6px; }
+.session-logout { margin-left: 8px; white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .topbar { flex-wrap: wrap; } .session-logout { margin-left: auto; } .login-form { padding: 18px; } }

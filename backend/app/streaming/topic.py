@@ -1,17 +1,14 @@
-from aiokafka.admin import AIOKafkaAdminClient, NewTopic
-from aiokafka.errors import TopicAlreadyExistsError
+from aiokafka.admin import AIOKafkaAdminClient
+from backend.app.streaming.security import kafka_options
 
 
-async def ensure_topic(settings):
-    admin = AIOKafkaAdminClient(bootstrap_servers=settings.brokers, request_timeout_ms=5000)
+async def ensure_topic(settings, role="consumer"):
+    admin = AIOKafkaAdminClient(bootstrap_servers=settings.brokers, request_timeout_ms=5000,
+                               **kafka_options(role, settings.brokers))
     try:
         await admin.start()
-        try:
-            await admin.create_topics([NewTopic(settings.topic, num_partitions=1, replication_factor=1)])
-        except TopicAlreadyExistsError:
-            pass
         metadata = await admin.describe_topics([settings.topic])
-        if len(metadata[0]["partitions"]) != 1:
-            raise ValueError("Telemetry topic must have exactly one partition")
+        if metadata[0].get("error_code") or len(metadata[0]["partitions"]) != 1:
+            raise ValueError("Initialize the authenticated telemetry topic with exactly one partition")
     finally:
         await admin.close()

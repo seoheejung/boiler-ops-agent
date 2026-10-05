@@ -3,7 +3,7 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync, createWriteStream 
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 import { createServer } from 'node:net';
 import { chromium } from '../frontend/node_modules/playwright/index.mjs';
 import { validateFailures } from './phase7.mjs';
@@ -11,19 +11,44 @@ import { reviewApplication } from './review-ui.mjs';
 import { reviewSecurity } from './security-review.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const phase = process.env.E2E_PHASE ?? 'phase1';
-const frontendPort = Number(process.env.E2E_FRONTEND_PORT ?? '4173');
+const phase = process.env.E2E_PHASE ?? 'phase7';
+const frontendPort = Number(process.env.E2E_FRONTEND_PORT ?? '4176');
 assert.ok(Number.isInteger(frontendPort) && frontendPort > 1023 && frontendPort <= 65535 && frontendPort !== 8000, 'Invalid E2E_FRONTEND_PORT');
 const frontendUrl = `http://127.0.0.1:${frontendPort}`;
-const out = resolve(root, 'artifacts/e2e', phase);
+const securityOnly = process.env.E2E_SECURITY_ONLY === '1';
+const out = resolve(root, 'artifacts/e2e', phase, ...(securityOnly ? ['security-check'] : []));
 mkdirSync(out, { recursive: true });
 const dataset = process.env.BOILER_DATASET_PATH ?? resolve(root, 'data/raw', readdirSync(resolve(root, 'data/raw')).find(file => file.endsWith('.csv')));
-const env = { ...process.env, PYTHONUTF8: '1', BOILER_DATASET_PATH: dataset, REPLAY_INTERVAL_MS: '250', STALE_AFTER_MS: '2000', KAFKA_BOOTSTRAP_SERVERS: '127.0.0.1:9092', KAFKA_TOPIC: `boiler.e2e.${Date.now()}`, OLLAMA_BASE_URL: process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434', OLLAMA_MODEL: process.env.OLLAMA_MODEL ?? 'qwen2.5-coder:7b', AGENT_TRACE_DIR: resolve(out, 'agent-traces') };
+const env = { ...process.env, PYTHONUTF8: '1', BOILER_DATASET_PATH: dataset, REPLAY_INTERVAL_MS: '250', STALE_AFTER_MS: '2000', KAFKA_BOOTSTRAP_SERVERS: '127.0.0.1:19092', KAFKA_TOPIC: `boiler.e2e.${Date.now()}`, OLLAMA_BASE_URL: process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434', OLLAMA_MODEL: process.env.OLLAMA_MODEL ?? 'qwen2.5-coder:7b', AGENT_TRACE_DIR: resolve(out, 'agent-traces') };
 const python = resolve(root, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
 if (Number(phase.replace('phase', '')) >= 6) {
-  env.SIMULATOR_APPROVAL_TOKEN = randomBytes(32).toString('hex');
   env.SIMULATOR_DB_PATH = resolve(out, `simulator-${Date.now()}.sqlite`);
 }
+const accounts = ['operator', 'other', 'viewer'].map(user_id => ({ user_id, role: user_id === 'viewer' ? 'viewer' : 'operator', key: randomBytes(32).toString('hex') }));
+Object.assign(env, { APP_PUBLIC_ORIGIN: frontendUrl, AUTH_SESSION_SECONDS: '3600',
+  AUTH_USERS_JSON: JSON.stringify(accounts.map(({ user_id, role, key }) => ({ user_id, role, key_hash: createHash('sha256').update(key).digest('hex') }))),
+  KAFKA_ADMIN_PASSWORD: randomBytes(32).toString('hex'), KAFKA_PRODUCER_PASSWORD: randomBytes(32).toString('hex'), KAFKA_CONSUMER_PASSWORD: randomBytes(32).toString('hex'),
+  KAFKA_HOST_PORT: '19092', KAFKA_SECURITY_PROTOCOL: 'SASL_PLAINTEXT', COMPOSE_PROJECT_NAME: 'boiler-ops-security-e2e' });
+const rawFetch = globalThis.fetch;
+let cookie = '';
+const apiFetch = (url, init = {}) => rawFetch(url, { ...init, headers: { Origin: frontendUrl, Cookie: cookie, ...init.headers } });
+async function loginApi(account = accounts[0]) {
+  const response = await rawFetch('http://127.0.0.1:8000/api/session', { method: 'POST', headers: { Origin: frontendUrl, 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: account.user_id, access_key: account.key }) });
+  assert.equal(response.status, 200, 'API login');
+  return response.headers.get('set-cookie').split(';')[0];
+}
+async function loginBrowser(page) {
+  await page.goto(frontendUrl);
+  mkdirSync(resolve(root, 'docs/images'), { recursive: true });
+  await page.screenshot({ path: resolve(root, 'docs/images/login.jpg'), type: 'jpeg', quality: 78 });
+  await page.getByLabel('사용자 ID', { exact: true }).fill(accounts[0].user_id);
+  await page.getByLabel('개인 접근 키', { exact: true }).fill(accounts[0].key);
+  await page.getByRole('button', { name: '로그인', exact: true }).click();
+  await page.getByTestId('ws-status').waitFor();
+  cookie = (await page.context().cookies()).filter(item => item.name === 'boiler_session').map(item => `${item.name}=${item.value}`).join('; ');
+  env.E2E_SESSION_COOKIE = cookie;
+}
+function compose(...args) { return execFileSync('docker', ['compose', ...args], { cwd: root, env, stdio: 'pipe', windowsHide: true }); }
 const children = [];
 const checks = [];
 const telemetry = new Map();
@@ -43,13 +68,15 @@ async function poll(fn, label, timeout = 30000) {
 function pass(name) { checks.push({ name, passed: true }); console.log(`PASS ${name}`); }
 const result = { phase, started_at: new Date().toISOString(), checks, topic: env.KAFKA_TOPIC };
 try {
-  for (const port of [8000, frontendPort]) {
+  for (const port of [8000, frontendPort, 19092]) {
     await new Promise((resolve, reject) => {
       const probe = createServer();
       probe.once('error', error => reject(new Error(`E2E port ${port} unavailable: ${error.message}`)));
       probe.listen(port, '127.0.0.1', () => probe.close(resolve));
     });
   }
+  compose('up', '-d', '--wait', 'kafka');
+  compose('exec', '-T', 'kafka', 'bash', '/opt/boiler/admin.sh', 'init-topic', env.KAFKA_TOPIC);
   let forecastModel;
   if (Number(phase.replace('phase', '')) >= 5) {
     env.FORECAST_MODEL_PATH = resolve(out, 'forecast-model.json');
@@ -59,11 +86,13 @@ try {
   const profile = JSON.parse(execFileSync(python, ['-m', 'scripts.dataset_profile'], { cwd: root, env, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 }));
   writeFileSync(resolve(out, 'input.json'), JSON.stringify(profile, null, 2));
   result.input_sha256 = profile.sha256;
-  const apiArgs = ['-m', 'uvicorn', 'backend.app.main:app', '--host', '127.0.0.1', '--port', '8000'];
+  const apiArgs = ['-m', 'uvicorn', 'backend.app.main:app', '--host', '127.0.0.1', '--port', '8000', '--ws-max-size', '1024', '--ws-max-queue', '8', '--limit-concurrency', '64', '--timeout-keep-alive', '5'];
   let backend = start(python, apiArgs, 'backend');
   start(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', String(frontendPort), '--strictPort'], 'frontend', resolve(root, 'frontend'));
-  await poll(async () => (await (await fetch('http://127.0.0.1:8000/api/health')).json()).kafka === 'CONNECTED', 'Kafka consumer readiness');
-  await poll(async () => (await fetch(frontendUrl)).ok, 'frontend readiness');
+  await poll(async () => (await rawFetch('http://127.0.0.1:8000/api/health')).ok, 'API readiness');
+  cookie = await loginApi();
+  await poll(async () => (await (await apiFetch('http://127.0.0.1:8000/api/state')).json()).kafka === 'CONNECTED', 'Kafka consumer readiness');
+  await poll(async () => (await apiFetch(frontendUrl)).ok, 'frontend readiness');
   browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const context = await browser.newContext({ viewport: { width: 1500, height: 1100 } });
   page = await context.newPage();
@@ -73,7 +102,8 @@ try {
     const event = JSON.parse(payload.toString());
     if (event.current) telemetry.set(`${event.current.run_id}:${event.current.sequence}`, event.current);
   }));
-  await page.goto(frontendUrl);
+  await loginBrowser(page);
+  if (!securityOnly) {
   await poll(async () => await page.getByTestId('ws-status').textContent() === 'CONNECTED', 'WebSocket connected');
   start(python, ['-m', 'backend.app.replay.producer', '--limit', '16'], 'producer');
   await poll(async () => Number(await page.getByTestId('sequence').textContent()) >= 4, 'live UI');
@@ -108,12 +138,16 @@ try {
   assert.ok((await marker.textContent()).includes(await page.getByTestId('inspector-value').textContent()));
   assert.equal(await page.getByTestId('inspector-time').textContent(), expected.source_time);
   await page.screenshot({ path: resolve(out, 'selected-sensor.png'), fullPage: true });
+  await page.screenshot({ path: resolve(root, 'docs/images/dashboard.jpg'), type: 'jpeg', quality: 78 });
   pass('KPI, Scene marker, selected Inspector and operations feed agree');
   await poll(async () => (await page.getByTestId('stream-status').textContent()).includes('STALE'), 'stale visible', 10000);
   pass('Replay end displays STALE');
   backend.kill();
   await poll(async () => await page.getByTestId('ws-status').textContent() !== 'CONNECTED', 'disconnected', 10000);
+  env.STALE_AFTER_MS = '300000';
   backend = start(python, apiArgs, 'backend-restarted');
+  await poll(async () => (await rawFetch('http://127.0.0.1:8000/api/health')).ok, 'restart ready');
+  await loginBrowser(page);
   await poll(async () => await page.getByTestId('ws-status').textContent() === 'CONNECTED', 'reconnected');
   await poll(async () => await page.getByTestId('sequence').textContent() === '16', 'recovered state');
   pass('WebSocket disconnect/reconnect preserves latest state');
@@ -131,8 +165,9 @@ try {
   await fallback.getByTestId('inspector-tag').waitFor();
   await fallback.screenshot({ path: resolve(out, 'fallback.png'), fullPage: true });
   pass('WebGL unavailable retains selectable equipment and live values');
+  await fallback.close();
   if (phase !== 'phase1') {
-    const registry = await (await fetch('http://127.0.0.1:8000/api/registry')).json();
+    const registry = await (await apiFetch('http://127.0.0.1:8000/api/registry')).json();
     assert.deepEqual(Object.keys(registry.sensors), profile.columns.filter(tag => tag !== '일자'));
     for (const sensor of Object.values(registry.sensors)) {
       assert.ok(sensor.mapping_basis);
@@ -143,21 +178,21 @@ try {
     await page.getByRole('button', { name: `센서 ${tag}`, exact: false }).click();
     assert.equal(await page.getByTestId('inspector-tag').textContent(), tag);
     await page.getByRole('img', { name: `${tag} 최근 추이` }).waitFor();
-    const history = await (await fetch(`http://127.0.0.1:8000/api/sensors/history?tag=${encodeURIComponent(tag)}`)).json();
+    const history = await (await apiFetch(`http://127.0.0.1:8000/api/sensors/history?tag=${encodeURIComponent(tag)}`)).json();
     assert.equal(history.points.length, 16);
     assert.equal(history.points[15].value, Number(expected.measurements[tag]));
     assert.equal(history.points[15].source_time, expected.source_time);
-    assert.equal((await fetch('http://127.0.0.1:8000/api/sensors/history?tag=unknown')).status, 404);
+    assert.equal((await apiFetch('http://127.0.0.1:8000/api/sensors/history?tag=unknown')).status, 404);
     await page.screenshot({ path: resolve(out, 'sensor-history.png'), fullPage: true });
     pass('All raw tags trace to registry; unknown positions remain unmapped; selected history matches source');
   }
   if (Number(phase.replace('phase', '')) >= 3) {
-    const generation = await (await fetch('http://127.0.0.1:8000/api/analysis/loop?name=generation')).json();
+    const generation = await (await apiFetch('http://127.0.0.1:8000/api/analysis/loop?name=generation')).json();
     assert.equal(generation.points.at(-1).source_time, expected.source_time);
     const delta = Number(expected.measurements['실제 출력값']) - Number(expected.measurements['목표 발전량']);
     assert.equal(generation.points.at(-1).actual_minus_target, delta);
     assert.equal(generation.summary.baseline_count, 15);
-    const reheater = await (await fetch('http://127.0.0.1:8000/api/analysis/loop?name=reheater')).json();
+    const reheater = await (await apiFetch('http://127.0.0.1:8000/api/analysis/loop?name=reheater')).json();
     assert.equal(reheater.target_available, false);
     assert.ok(reheater.points.every(point => point.actual_minus_target === null));
     await page.getByTestId('target-missing').waitFor();
@@ -174,7 +209,7 @@ try {
     assert.equal(response.status(), 200, JSON.stringify(answer));
     assert.equal(answer.equipment, 'feeders');
     await page.getByTestId('agent-answer').waitFor();
-    const trace = await (await fetch(`http://127.0.0.1:8000/api/agent/traces/${answer.trace_id}`)).json();
+    const trace = await (await apiFetch(`http://127.0.0.1:8000/api/agent/traces/${answer.trace_id}`)).json();
     for (const evidence of answer.evidence) {
       const call = trace.calls.find(call => call.id === evidence.tool_id);
       let value = call.result;
@@ -182,13 +217,13 @@ try {
       assert.equal(value, evidence.value);
     }
     assert.ok(trace.calls.every(call => call.equipment === 'feeders' && call.tool.startsWith('get_')));
-    assert.equal((await fetch('http://127.0.0.1:8000/api/tools/get_sensor_history?equipment=feeders&tag=unknown')).status, 422);
-    assert.equal((await fetch('http://127.0.0.1:8000/api/tools/write_valve?equipment=feeders')).status, 422);
+    assert.equal((await apiFetch('http://127.0.0.1:8000/api/tools/get_sensor_history?equipment=feeders&tag=unknown')).status, 422);
+    assert.equal((await apiFetch('http://127.0.0.1:8000/api/tools/write_valve?equipment=feeders')).status, 422);
     writeFileSync(resolve(out, 'agent.json'), JSON.stringify({ answer, trace }, null, 2));
     pass('Actual Ollama model chooses read tools and evidence; every numeric statement traces to tool result');
   }
   if (Number(phase.replace('phase', '')) >= 5) {
-    const response = await fetch('http://127.0.0.1:8000/api/forecast');
+    const response = await apiFetch('http://127.0.0.1:8000/api/forecast');
     const forecast = await response.json();
     assert.equal(response.status, 200, JSON.stringify(forecast));
     assert.equal(forecast.horizon_minutes, 5);
@@ -199,7 +234,7 @@ try {
     assert.ok(forecastModel.test.naive.samples > 7000);
     assert.ok(Number.isFinite(forecastModel.test.linear_ar.rmse));
     assert.equal(await page.getByTestId('forecast-value').textContent(), forecast.prediction.toFixed(2));
-    const tool = await (await fetch('http://127.0.0.1:8000/api/tools/get_temperature_forecast?equipment=reheater')).json();
+    const tool = await (await apiFetch('http://127.0.0.1:8000/api/tools/get_temperature_forecast?equipment=reheater')).json();
     assert.equal(tool.prediction, forecast.prediction);
     await page.getByRole('button', { name: '센서 최종재열기 입구 온도 평균값', exact: false }).click();
     await page.getByLabel('질문', { exact: true }).fill('Use get_temperature_forecast to report the 5-minute predicted temperature. Cite prediction evidence.');
@@ -208,7 +243,7 @@ try {
     const agent = await agentResponse;
     const advisory = await agent.json();
     assert.equal(agent.status(), 200, JSON.stringify(advisory));
-    const advisoryTrace = await (await fetch(`http://127.0.0.1:8000/api/agent/traces/${advisory.trace_id}`)).json();
+    const advisoryTrace = await (await apiFetch(`http://127.0.0.1:8000/api/agent/traces/${advisory.trace_id}`)).json();
     assert.ok(advisoryTrace.calls.some(call => call.tool === 'get_temperature_forecast'));
     assert.ok(advisory.evidence.some(evidence => evidence.field === 'prediction' && evidence.value === forecast.prediction));
     writeFileSync(resolve(out, 'advisory-agent.json'), JSON.stringify({ advisory, advisoryTrace }, null, 2));
@@ -216,57 +251,80 @@ try {
     pass('Chronological train/validation/test, baseline MAE/RMSE, held-out forecast UI and Agent read tool');
   }
   if (Number(phase.replace('phase', '')) >= 6) {
-    const stateBefore = await (await fetch('http://127.0.0.1:8000/api/simulator')).json();
+    const stateBefore = await (await apiFetch('http://127.0.0.1:8000/api/simulator')).json();
     const proposalResponse = page.waitForResponse(response => response.url().endsWith('/api/simulator/proposals'), { timeout: 180000 });
     await page.getByRole('button', { name: 'Agent Simulator 제안 생성', exact: true }).click();
     const created = await proposalResponse;
     const proposal = await created.json();
     assert.equal(created.status(), 200, JSON.stringify(proposal));
     assert.equal(proposal.requested_value, 1);
-    assert.equal((await (await fetch('http://127.0.0.1:8000/api/simulator')).json()).value, stateBefore.value);
+    assert.equal((await (await apiFetch('http://127.0.0.1:8000/api/simulator')).json()).value, stateBefore.value);
     const decisionUrl = `http://127.0.0.1:8000/api/simulator/proposals/${proposal.id}/decision`;
     const decision = { approve: true, confirm: true, expected_revision: proposal.expected_revision };
-    assert.equal((await fetch(decisionUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(decision) })).status, 401);
-    await page.getByLabel('로컬 운영자 승인 토큰', { exact: true }).fill(env.SIMULATOR_APPROVAL_TOKEN);
+    assert.equal((await rawFetch(decisionUrl, { method: 'POST', headers: { Origin: frontendUrl, 'Content-Type': 'application/json' }, body: JSON.stringify(decision) })).status, 401);
     await page.getByRole('checkbox').check();
     await page.getByRole('button', { name: '승인 및 Simulator 실행', exact: true }).click();
     await poll(async () => await page.getByTestId('proposal-status').textContent() === 'executed', 'approved execution');
     assert.equal(await page.getByTestId('sim-value').textContent(), '1');
-    const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${env.SIMULATOR_APPROVAL_TOKEN}` };
-    assert.equal((await fetch(decisionUrl, { method: 'POST', headers, body: JSON.stringify(decision) })).status, 409);
+    const headers = { 'Content-Type': 'application/json' };
+    assert.equal((await apiFetch(decisionUrl, { method: 'POST', headers, body: JSON.stringify(decision) })).status, 409);
+    const freshResponse = page.waitForResponse(response => response.url().endsWith('/api/agent/query'), { timeout: 360000 });
+    await page.getByRole('button', { name: 'Agent 조회', exact: true }).click();
+    assert.equal((await freshResponse).status(), 200);
     const rejectResponse = page.waitForResponse(response => response.url().endsWith('/api/simulator/proposals'), { timeout: 180000 });
     await page.getByRole('button', { name: 'Agent Simulator 제안 생성', exact: true }).click();
     const rejectedProposal = await (await rejectResponse).json();
-    await page.getByLabel('로컬 운영자 승인 토큰', { exact: true }).fill(env.SIMULATOR_APPROVAL_TOKEN);
     await page.getByRole('checkbox').check();
     await page.getByRole('button', { name: '거절', exact: true }).click();
     await poll(async () => await page.getByTestId('proposal-status').textContent() === 'rejected', 'rejected proposal');
     assert.equal(await page.getByTestId('sim-value').textContent(), '1');
-    assert.equal((await fetch(`http://127.0.0.1:8000/api/simulator/proposals/${rejectedProposal.id}/decision`, { method: 'POST', headers, body: JSON.stringify({ ...decision, expected_revision: 1 }) })).status, 409);
-    const audit = await (await fetch('http://127.0.0.1:8000/api/simulator/audit')).json();
+    assert.equal((await apiFetch(`http://127.0.0.1:8000/api/simulator/proposals/${rejectedProposal.id}/decision`, { method: 'POST', headers, body: JSON.stringify({ ...decision, expected_revision: 1 }) })).status, 409);
+    const audit = await (await apiFetch('http://127.0.0.1:8000/api/simulator/audit')).json();
     const executions = audit.filter(row => row.event === 'executed');
     assert.equal(executions.length, 1);
     assert.ok(audit.some(row => row.event === 'approved' && row.proposal_id === executions[0].proposal_id));
     writeFileSync(resolve(out, 'simulator-audit.json'), JSON.stringify(audit, null, 2));
     await page.screenshot({ path: resolve(out, 'simulator-decision.png'), fullPage: true });
+    await page.locator('#simulator').screenshot({ path: resolve(root, 'docs/images/simulator.jpg'), type: 'jpeg', quality: 78 });
     pass('Real model proposal, authenticated explicit browser approval, immutable decision, rejection and complete write audit');
   }
   if (phase === 'phase7') {
-    await validateFailures({ page, context, env, out, root, python, poll, pass, frontendUrl, restartBackend: async () => {
+    await validateFailures({ page, context, env, out, root, python, poll, pass, frontendUrl, apiFetch, rawFetch, restartBackend: async () => {
       backend.kill();
       await new Promise(resolve => backend.once('exit', resolve));
       backend = start(python, apiArgs, 'backend-persistence');
-      await poll(async () => (await fetch('http://127.0.0.1:8000/api/health')).ok, 'backend restarted');
+      await poll(async () => (await rawFetch('http://127.0.0.1:8000/api/health')).ok, 'backend restarted');
+      await loginBrowser(page);
     } });
     await reviewApplication(page, context, resolve(out, 'ui-review'));
     pass('Keyboard navigation, mobile reflow, named controls, accessibility trees and custom 404');
-    await reviewSecurity({ context, out });
-    pass('Security review observations recorded; anonymous approval remains blocked');
+  }
+  } else {
+    start(python, ['-m', 'backend.app.replay.producer', '--limit', '16'], 'producer');
+    await poll(async () => (await (await apiFetch('http://127.0.0.1:8000/api/state')).json()).current?.sequence === 16, 'security fixture telemetry');
+    env.STALE_AFTER_MS = '300000';
+    backend.kill();
+    await new Promise(resolve => backend.once('exit', resolve));
+    backend = start(python, apiArgs, 'backend-security');
+    await poll(async () => (await rawFetch('http://127.0.0.1:8000/api/health')).ok, 'security backend ready');
+    await loginBrowser(page);
+    await poll(async () => (await (await apiFetch('http://127.0.0.1:8000/api/state')).json()).current?.sequence === 16, 'security fixture recovered');
+  }
+  if (phase === 'phase7') {
+    await reviewSecurity({ context, page, out, env, root, python, apiFetch, rawFetch, accounts, loginApi, frontendUrl, poll, restartForExpiry: async () => {
+      env.AUTH_SESSION_SECONDS = '60';
+      backend.kill();
+      await new Promise(resolve => backend.once('exit', resolve));
+      backend = start(python, apiArgs, 'backend-session-expiry');
+      await poll(async () => (await rawFetch('http://127.0.0.1:8000/api/health')).ok, 'expiry backend ready');
+      await loginBrowser(page);
+    } });
+    pass('Security boundaries reject anonymous, cross-origin, cross-user, replay and over-capacity operations');
   }
   assert.deepEqual(errors, []);
-  if (env.SIMULATOR_APPROVAL_TOKEN) {
+  if (accounts.length) {
     for (const file of readdirSync(out, { recursive: true }).filter(file => /\.(json|jsonl|log)$/.test(file))) {
-      assert.ok(!readFileSync(resolve(out, file), 'utf8').includes(env.SIMULATOR_APPROVAL_TOKEN), `Credential found in artifact ${file}`);
+      for (const secret of [...accounts.map(account => account.key), env.KAFKA_ADMIN_PASSWORD, env.KAFKA_PRODUCER_PASSWORD, env.KAFKA_CONSUMER_PASSWORD]) assert.ok(!readFileSync(resolve(out, file), 'utf8').includes(secret), `Credential found in artifact ${file}`);
     }
     pass('Approval credential absent from JSON, telemetry and log artifacts');
   }
@@ -281,4 +339,5 @@ try {
   writeFileSync(resolve(out, 'run.json'), JSON.stringify(result, null, 2));
   await browser?.close();
   for (const child of children.reverse()) child.kill();
+  try { compose('down'); } catch { console.error('E2E Kafka cleanup failed; stop boiler-ops-security-e2e manually'); }
 }

@@ -1,7 +1,8 @@
 import math
 import time
 from collections import deque
-from datetime import datetime
+from datetime import UTC, datetime
+from uuid import UUID
 
 
 class BoilerState:
@@ -14,7 +15,6 @@ class BoilerState:
         self.kafka = "CONNECTING"
         self.error = None
         self.rejected = 0
-        self.retired_runs = set()
 
     def apply(self, event, offset):
         if not isinstance(event, dict):
@@ -23,6 +23,10 @@ class BoilerState:
         run_id = event.get("run_id")
         if type(sequence) is not int or sequence < 1 or not isinstance(run_id, str) or not run_id:
             raise ValueError("Invalid run_id or sequence")
+        try:
+            UUID(run_id)
+        except ValueError:
+            raise ValueError("run_id must be a UUID") from None
         source_time = event.get("source_time")
         emitted_at = event.get("emitted_at")
         try:
@@ -32,11 +36,13 @@ class BoilerState:
             raise ValueError("Invalid source_time or emitted_at") from error
         if emitted_instant.tzinfo is None:
             raise ValueError("emitted_at requires timezone")
+        if emitted_instant.timestamp() > datetime.now(UTC).timestamp() + 30:
+            raise ValueError("emitted_at is in the future")
+        if self.current and emitted_instant <= datetime.fromisoformat(self.current["emitted_at"]):
+            raise ValueError("Emission time did not increase; replayed event rejected")
         measurements = event.get("measurements")
         if not isinstance(measurements, dict) or set(measurements) != set(self.registry):
             raise ValueError("Event tags do not match CSV registry")
-        if run_id in self.retired_runs:
-            raise ValueError("Event from retired replay run")
         new_run = self.current is None or run_id != self.current["run_id"]
         if self.current and not new_run:
             if sequence != self.current["sequence"] + 1:
@@ -48,7 +54,7 @@ class BoilerState:
         sensors = {}
         for tag, raw in measurements.items():
             value, quality, message = None, "missing", None
-            if not isinstance(raw, str):
+            if not isinstance(raw, str) or len(raw) > 256:
                 raise ValueError(f"Non-string raw value for {tag!r}")
             if raw.strip():
                 try:
@@ -60,8 +66,6 @@ class BoilerState:
                     value, quality, message = None, "parse_error", "Invalid finite number"
             sensors[tag] = {"value": value, "raw": raw, "quality": quality, "error": message}
         if new_run:
-            if self.current:
-                self.retired_runs.add(self.current["run_id"])
             self.history.clear()
         self.current = {"run_id": run_id, "sequence": sequence, "source_time": source_time,
                         "source_row": event.get("source_row"),

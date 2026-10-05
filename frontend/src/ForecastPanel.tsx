@@ -1,3 +1,4 @@
+import { apiFetch } from './session';
 import { useEffect, useState } from 'react';
 import { useTelemetry } from './telemetry';
 
@@ -8,7 +9,7 @@ export function ForecastPanel() {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     const controller = new AbortController();
-    fetch('/api/forecast', { signal: controller.signal }).then(async response => { const data = await response.json(); if (!response.ok) throw new Error(data.detail); return data; })
+    apiFetch('/api/forecast', { signal: controller.signal }).then(async response => { const data = await response.json(); if (!response.ok) throw new Error(data.detail); return data; })
       .then(data => { setData(data); setError(null); }).catch(error => { if (error.name !== 'AbortError') { setError(String(error)); setData(null); } });
     return () => controller.abort();
   }, [telemetry.current?.run_id, telemetry.current?.sequence]);

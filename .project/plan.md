@@ -17,6 +17,22 @@
 | 데이터 출처 | 공공데이터포털 |
 | 현재 진행 상태 | Phase 1~7 구현 및 로컬 통합 E2E 검증 완료 |
 
+### Phase 7 보안 보완 범위 — 2026-10-05 사용자 요청
+
+감사에서 확인된 무인증 조회·제안, 교차 Origin WebSocket, 자원 한도 부재,
+Kafka 생산자 신뢰, 공유 승인 자격, 오래된 근거 재사용을 현재 Phase의 보완 작업으로 처리한다.
+
+- 사용자별 고엔트로피 자격의 해시 설정과 만료 가능한 HttpOnly 세션. 역할은 viewer/operator.
+- 관측 조회는 인증된 사용자, Agent·제안·결정은 operator. Trace·제안·Audit는 본인 소유만 조회·변경.
+- 변경 요청과 WebSocket은 설정된 정확한 Origin만 허용. 로그아웃·만료 세션의 연결 종료.
+- HTTP 본문·요청 속도·모델 동시 작업·WebSocket 연결·Trace/제안 저장 한도. Audit 페이지네이션.
+- Kafka SASL 인증과 생산자/소비자 Topic ACL. 관리 자격은 별도 초기화 도구에서만 사용.
+- 제안과 결정 시 근거의 소유자·생성 시각·Tag·재생 run·관측 상태 검사. 같은 Trace로 중복 제안 거부.
+- 기존 공유 SIMULATOR_APPROVAL_TOKEN 사용 중단. 기존 소유자 없는 기록은 인증 사용자에게 공개하지 않음.
+- 새 의존성, 외부 인증 서비스, 실제 설비 제어, 운영 배포는 이번 범위에 포함하지 않음.
+
+계약과 실패 시나리오 및 E2E 완료 기준은 `docs/instructions/phase7-security-hardening.md`에 정의한다.
+
 ## 2. 프로젝트 목표
 
 BoilerOps Agent는 정적인 분 단위 발전설비 데이터를 시간 순서대로 재생해 실시간 보일러 운전 환경을 구성한다.

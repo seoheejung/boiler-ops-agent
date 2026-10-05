@@ -3,23 +3,23 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-export async function validateFailures({ page, context, env, out, root, python, poll, pass, frontendUrl, restartBackend }) {
+export async function validateFailures({ page, context, env, out, root, python, poll, pass, frontendUrl, apiFetch, rawFetch, restartBackend }) {
   const base = 'http://127.0.0.1:8000';
   const observations = [];
-  const json = async path => (await fetch(base + path)).json();
+  const json = async path => (await apiFetch(base + path)).json();
   const fault = mode => {
     const event = JSON.parse(execFileSync(python, ['-m', 'scripts.inject_fault', mode], { cwd: root, env, encoding: 'utf8' }));
     observations.push({ fault: mode, event }); return event;
   };
   const original = (await json('/api/state')).current;
   try {
-    execFileSync('docker', ['compose', 'stop', '-t', '2', 'kafka'], { cwd: root, stdio: 'pipe', windowsHide: true });
+    execFileSync('docker', ['compose', 'stop', '-t', '2', 'kafka'], { cwd: root, env, stdio: 'pipe', windowsHide: true });
     await poll(async () => (await json('/api/state')).kafka === 'DISCONNECTED', 'Kafka outage detection', 20000);
     assert.equal((await json('/api/state')).current.sequence, original.sequence);
     await poll(async () => await page.getByTestId('kafka-status').textContent() === 'DISCONNECTED', 'Kafka outage UI');
     observations.push({ fault: 'kafka-outage', state: await json('/api/state') });
   } finally {
-    execFileSync('docker', ['compose', 'start', 'kafka'], { cwd: root, stdio: 'pipe', windowsHide: true });
+    execFileSync('docker', ['compose', 'start', 'kafka'], { cwd: root, env, stdio: 'pipe', windowsHide: true });
   }
   await poll(async () => (await json('/api/state')).kafka === 'CONNECTED', 'Kafka recovery', 45000);
   const recovered = fault('valid');
@@ -91,7 +91,7 @@ export async function validateFailures({ page, context, env, out, root, python, 
   const modelPath = env.FORECAST_MODEL_PATH;
   renameSync(modelPath, modelPath + '.backup');
   try {
-    const response = await fetch(base + '/api/agent/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ equipment: 'reheater', question: 'Use get_temperature_forecast to report the predicted temperature.', tag: '최종재열기 입구 온도 평균값' }) });
+    const response = await apiFetch(base + '/api/agent/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ equipment: 'reheater', question: 'Use get_temperature_forecast to report the predicted temperature.', tag: '최종재열기 입구 온도 평균값' }) });
     const failure = await response.json();
     assert.equal(response.status, 503, JSON.stringify(failure));
     const trace = await json('/api/agent/traces/' + failure.detail.trace_id);
@@ -102,24 +102,27 @@ export async function validateFailures({ page, context, env, out, root, python, 
   } finally { renameSync(modelPath + '.backup', modelPath); }
   pass('Agent tool failure returns 503 plus failed-call trace while telemetry stays available');
 
-  const source = JSON.parse(readFileSync(resolve(out, 'advisory-agent.json'), 'utf8')).advisory.trace_id;
-  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${env.SIMULATOR_APPROVAL_TOKEN}` };
+  const headers = { 'Content-Type': 'application/json' };
   const propose = async () => {
-    const response = await fetch(base + '/api/simulator/proposals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source_trace_id: source, intent: 'Increase the local demo parameter by one synthetic step.' }) });
+    fault('valid');
+    const query = await apiFetch(base + '/api/agent/query', { method: 'POST', headers, body: JSON.stringify({ equipment: 'reheater', tag: '최종재열기 입구 온도 평균값', question: 'Summarize current observed values.' }) });
+    assert.equal(query.status, 200, JSON.stringify(await query.clone().json()));
+    const source = (await query.json()).trace_id;
+    const response = await apiFetch(base + '/api/simulator/proposals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source_trace_id: source, intent: 'Increase the local demo parameter by one synthetic step.' }) });
     const data = await response.json(); assert.equal(response.status, 200, JSON.stringify(data)); return data;
   };
   const proposal = await propose();
   const competing = await propose();
   const url = base + `/api/simulator/proposals/${proposal.id}/decision`;
   const decision = { approve: true, confirm: true, expected_revision: proposal.expected_revision };
-  const send = (body, auth = headers, address = url) => fetch(address, { method: 'POST', headers: auth, body: JSON.stringify(body) });
+  const send = (body, auth = headers, address = url) => apiFetch(address, { method: 'POST', headers: auth, body: JSON.stringify(body) });
   const before = await json('/api/simulator');
-  assert.equal((await send(decision, { ...headers, Authorization: 'Bearer invalid' })).status, 401);
+  assert.equal((await rawFetch(url, { method: 'POST', headers: { ...headers, Origin: frontendUrl }, body: JSON.stringify(decision) })).status, 401);
   assert.equal((await send({ ...decision, confirm: false })).status, 422);
   assert.equal((await send({ ...decision, approve: 'true' })).status, 422);
   assert.equal((await send({ ...decision, requested_value: 9 })).status, 422);
   assert.equal((await send({ ...decision, expected_revision: 99 })).status, 409);
-  assert.equal((await fetch(base + '/api/simulator/execute', { method: 'POST', headers, body: '{}' })).status, 404);
+  assert.equal((await apiFetch(base + '/api/simulator/execute', { method: 'POST', headers, body: '{}' })).status, 404);
   assert.equal((await json('/api/simulator')).value, before.value);
   const concurrent = await Promise.all([send(decision), send(decision)]);
   assert.deepEqual(concurrent.map(response => response.status).sort(), [200, 409]);

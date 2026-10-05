@@ -1,5 +1,7 @@
 # Phase 7 통합 실행 결과
 
+이 문서는 최초 Phase 7 검증 기록을 보존합니다. 개인 세션·Kafka ACL 도입 이후의 실행 절차는 [README](../../README.md), 최신 통합 결과는 [보안 보완 결과](phase7-security-hardening.md)를 확인하세요.
+
 2026-10-05 최종 `E2E_PHASE=phase7 node scripts/e2e.mjs` 통과.
 `npm.cmd run build --prefix frontend`의 TypeScript/Vite 빌드 통과.
 실제 원본 CSV, Kafka 3.9.1, FastAPI, Chromium, Ollama qwen2.5-coder:7b, SQLite를 사용했다.

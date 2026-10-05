@@ -2,10 +2,9 @@ import json
 import os
 import uuid
 from datetime import UTC, datetime
-from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Literal
@@ -37,6 +36,11 @@ class AgentFailure(Exception):
         self.trace_id = trace_id
 
 
+class NoModelRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, file, code, message, headers, new_url):
+        raise ValueError("Model endpoint redirects are not allowed")
+
+
 def model_json(messages, schema):
     base, model = os.getenv("OLLAMA_BASE_URL"), os.getenv("OLLAMA_MODEL")
     if not base or not model:
@@ -47,20 +51,20 @@ def model_json(messages, schema):
     body = {"model": model, "messages": messages, "stream": False, "format": schema,
             "options": {"temperature": 0, "seed": 7, "num_predict": 220, "num_ctx": 8192}}
     request = Request(base.rstrip('/') + '/api/chat', data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
-    with urlopen(request, timeout=180) as response:
-        payload = json.load(response)
+    with build_opener(ProxyHandler({}), NoModelRedirect()).open(request, timeout=180) as response:
+        data = response.read(256 * 1024 + 1)
+        if len(data) > 256 * 1024:
+            raise ValueError("Model response size limit exceeded")
+        payload = json.loads(data)
     return json.loads(payload["message"]["content"])
 
 
-def trace_directory():
-    directory = Path(os.getenv("AGENT_TRACE_DIR", "artifacts/agent/traces"))
-    directory.mkdir(parents=True, exist_ok=True)
-    return directory
-
-
-def query_agent(request, tools):
+def query_agent(request, tools, principal, store):
     trace_id = str(uuid.uuid4())
     trace = {"trace_id": trace_id, "created_at": datetime.now(UTC).isoformat(), "request": request.model_dump(),
+             "owner": principal.user_id,
+             "context": {"run_id": (tools.state.current or {}).get("run_id"),
+                         "sequence": (tools.state.current or {}).get("sequence"), "tag": tools.tag},
              "model": os.getenv("OLLAMA_MODEL"), "calls": [], "evidence": [], "snapshot_status": tools.snapshot["status"]}
     try:
         plan_schema = ToolPlan.model_json_schema()
@@ -109,4 +113,4 @@ def query_agent(request, tools):
         trace["error"] = f"{type(error).__name__}: {error}"
         raise AgentFailure(trace_id, trace["error"]) from error
     finally:
-        (trace_directory() / f"{trace_id}.json").write_text(json.dumps(trace, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
+        store.write(trace)

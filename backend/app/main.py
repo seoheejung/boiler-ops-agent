@@ -1,16 +1,19 @@
 import asyncio
-import json
 from uuid import UUID
 from contextlib import asynccontextmanager, suppress
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Header
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Request, Response
 
+from fastapi.exceptions import RequestValidationError
+from starlette.responses import JSONResponse
+from backend.app.security import Security, SecurityMiddleware, Login
+from backend.app.agent.traces import TraceStore
 from backend.app.config import Settings
 from backend.app.domain.registry import EQUIPMENT, PROCESS_FLOWS, make_registry
 from backend.app.domain.state import BoilerState
 from backend.app.domain.analysis import loop_analysis, sensor_summary
 from backend.app.agent.tools import ReadTools
-from backend.app.agent.service import AgentQuery, AgentFailure, query_agent, trace_directory
+from backend.app.agent.service import AgentQuery, AgentFailure, query_agent
 from backend.app.forecast.service import forecast
 from backend.app.simulator.service import Simulator, SimulatorError, ProposalRequest, Decision
 from backend.app.replay.csv_source import columns
@@ -24,7 +27,11 @@ async def lifespan(app):
     registry = make_registry([tag for tag in columns(settings) if tag != settings.time_column])
     app.state.boiler = BoilerState(registry, settings)
     app.state.hub = Hub()
-    app.state.simulator = Simulator()
+    from backend.app.streaming.security import kafka_options
+    kafka_options("consumer", settings.brokers)
+    app.state.security = Security()
+    app.state.traces = TraceStore()
+    app.state.simulator = Simulator(app.state.boiler, app.state.traces)
     task = asyncio.create_task(consume(settings, app.state.boiler, app.state.hub))
     yield
     task.cancel()
@@ -32,12 +39,40 @@ async def lifespan(app):
         await task
 
 
-app = FastAPI(title="BoilerOps Agent", lifespan=lifespan)
+app = FastAPI(title="BoilerOps Agent", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+app.add_middleware(SecurityMiddleware, owner=app)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request, error):
+    return JSONResponse({"detail": [{"loc": item["loc"], "type": item["type"]} for item in error.errors()]}, status_code=422)
+
+
+@app.post("/api/session")
+async def login(credentials: Login, request: Request, response: Response):
+    security = app.state.security
+    token, principal = security.login(credentials)
+    security.logout(request.scope)
+    response.set_cookie(security.cookie_name, token, max_age=security.session_seconds,
+                        httponly=True, secure=security.secure_cookie, samesite="strict", path="/")
+    return principal
+
+
+@app.get("/api/session")
+async def session(request: Request):
+    return request.state.principal
+
+
+@app.delete("/api/session")
+async def logout(request: Request, response: Response):
+    app.state.security.logout(request.scope)
+    response.delete_cookie(app.state.security.cookie_name, path="/")
+    return {"status": "logged_out"}
 
 
 @app.get("/api/health")
 async def health():
-    return app.state.boiler.snapshot()
+    return {"status": "ok"}
 
 
 @app.get("/api/registry")
@@ -96,10 +131,13 @@ async def read_tool(name: str, equipment: str, tag: str | None = None):
 
 
 @app.post("/api/agent/query")
-async def agent_query(request: AgentQuery):
+async def agent_query(request: AgentQuery, http: Request):
     try:
         tools = ReadTools(app.state.boiler, request.equipment, request.tag)
-        return await asyncio.to_thread(query_agent, request, tools)
+        def work():
+            with app.state.traces.reserve():
+                return query_agent(request, tools, http.state.principal, app.state.traces)
+        return await app.state.security.model_work(http.state.principal, work)
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
     except AgentFailure as error:
@@ -107,27 +145,24 @@ async def agent_query(request: AgentQuery):
 
 
 @app.get("/api/agent/traces/{trace_id}")
-async def agent_trace(trace_id: UUID):
-    path = trace_directory() / f"{trace_id}.json"
-    if not path.is_file():
-        raise HTTPException(404, "Trace not found")
-    return json.loads(path.read_text(encoding="utf-8"))
+async def agent_trace(trace_id: UUID, request: Request):
+    return app.state.traces.read(trace_id, request.state.principal)
 
 
 @app.get("/api/simulator")
-async def simulator_state():
-    return app.state.simulator.snapshot()
+async def simulator_state(request: Request):
+    return app.state.simulator.snapshot(request.state.principal)
 
 
 @app.get("/api/simulator/audit")
-async def simulator_audit():
-    return app.state.simulator.audit_log()
+async def simulator_audit(request: Request, after_id: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
+    return app.state.simulator.audit_log(request.state.principal, after_id, limit)
 
 
 @app.post("/api/simulator/proposals")
-async def simulator_propose(request: ProposalRequest):
+async def simulator_propose(request: ProposalRequest, http: Request):
     try:
-        return await asyncio.to_thread(app.state.simulator.propose, request)
+        return await app.state.security.model_work(http.state.principal, lambda: app.state.simulator.propose(request, http.state.principal))
     except SimulatorError as error:
         raise HTTPException(error.status, str(error)) from error
     except (ValueError, OSError, KeyError) as error:
@@ -135,22 +170,38 @@ async def simulator_propose(request: ProposalRequest):
 
 
 @app.post("/api/simulator/proposals/{proposal_id}/decision")
-async def simulator_decide(proposal_id: UUID, decision: Decision, authorization: str | None = Header(default=None)):
+async def simulator_decide(proposal_id: UUID, decision: Decision, request: Request):
     try:
-        return app.state.simulator.decide(proposal_id, decision, authorization)
+        app.state.security.operator(request.state.principal)
+        return app.state.simulator.decide(proposal_id, decision, request.state.principal)
     except SimulatorError as error:
         raise HTTPException(error.status, str(error)) from error
 
 
 @app.websocket("/api/ws")
 async def websocket(ws: WebSocket):
-    await ws.accept()
+    security = app.state.security
+    try:
+        principal = security.websocket_open(ws.scope)
+    except HTTPException:
+        await ws.close(code=1008)
+        return
+    try:
+        await ws.accept()
+    except (WebSocketDisconnect, RuntimeError, OSError, asyncio.CancelledError):
+        security.websocket_close(principal)
+        raise
     hub = app.state.hub
     queue = hub.subscribe()
 
     async def send():
         await ws.send_json(app.state.boiler.snapshot())
         while True:
+            try:
+                security.principal(ws.scope)
+            except HTTPException:
+                await ws.close(code=1008, reason="Session expired or revoked")
+                return
             try:
                 message = await asyncio.wait_for(queue.get(), timeout=.5)
             except TimeoutError:
@@ -162,19 +213,27 @@ async def websocket(ws: WebSocket):
 
     async def receive():
         while True:
-            await ws.receive_text()
+            message = await ws.receive_text()
+            if len(message) > 1024:
+                await ws.close(code=1009)
+                return
+            security.rate(("ws-message", principal.user_id), 30)
 
     tasks = [asyncio.create_task(send()), asyncio.create_task(receive())]
     try:
         done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
             task.result()
+    except HTTPException:
+        with suppress(WebSocketDisconnect, RuntimeError, OSError):
+            await ws.close(code=1008, reason="WebSocket message rate exceeded")
     except (WebSocketDisconnect, RuntimeError, OSError):
         pass
     finally:
+        security.websocket_close(principal)
         hub.unsubscribe(queue)
         for task in tasks:
             task.cancel()
         for task in tasks:
-            with suppress(asyncio.CancelledError, WebSocketDisconnect, RuntimeError, OSError):
+            with suppress(asyncio.CancelledError, WebSocketDisconnect, RuntimeError, OSError, HTTPException):
                 await task

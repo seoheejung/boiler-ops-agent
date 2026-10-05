@@ -9,12 +9,13 @@ from aiokafka import AIOKafkaProducer
 from backend.app.config import Settings
 from backend.app.replay.csv_source import rows
 from backend.app.streaming.topic import ensure_topic
+from backend.app.streaming.security import kafka_options
 
 
 async def replay(limit: int | None = None):
     settings = Settings.load()
-    await ensure_topic(settings)
-    producer = AIOKafkaProducer(bootstrap_servers=settings.brokers, enable_idempotence=True,
+    await ensure_topic(settings, "producer")
+    producer = AIOKafkaProducer(bootstrap_servers=settings.brokers, enable_idempotence=True, **kafka_options("producer", settings.brokers),
                                value_serializer=lambda value: json.dumps(value, ensure_ascii=False, allow_nan=False).encode())
     run_id = str(uuid.uuid4())
     await producer.start()

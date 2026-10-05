@@ -10,11 +10,13 @@ from aiokafka.admin import AIOKafkaAdminClient
 from aiokafka.structs import TopicPartition, OffsetAndMetadata
 
 from backend.app.streaming.topic import ensure_topic
+from backend.app.streaming.security import kafka_options
 
 logger = logging.getLogger(__name__)
 
 
 async def consume(settings, state, hub):
+    options = kafka_options("consumer", settings.brokers)
     group = f"boiler-monitor-{uuid.uuid4()}"
     while True:
         consumer = None
@@ -24,9 +26,9 @@ async def consume(settings, state, hub):
             consumer = AIOKafkaConsumer(settings.topic, bootstrap_servers=settings.brokers,
                                         group_id=group, auto_offset_reset="earliest", enable_auto_commit=False,
                                         request_timeout_ms=5000, session_timeout_ms=6000,
-                                        heartbeat_interval_ms=1000)
+                                        heartbeat_interval_ms=1000, max_partition_fetch_bytes=262144, **options)
             await consumer.start()
-            admin = AIOKafkaAdminClient(bootstrap_servers=settings.brokers, request_timeout_ms=2000)
+            admin = AIOKafkaAdminClient(bootstrap_servers=settings.brokers, request_timeout_ms=2000, **options)
             await admin.start()
             checked = 0
             state.kafka = "CONNECTED"
@@ -39,6 +41,8 @@ async def consume(settings, state, hub):
                 for messages in batches.values():
                     for message in messages:
                         try:
+                            if len(message.value) > 65536:
+                                raise ValueError("Telemetry record exceeds size limit")
                             state.apply(json.loads(message.value), message.offset)
                         except (ValueError, TypeError, UnicodeDecodeError) as error:
                             state.rejected += 1

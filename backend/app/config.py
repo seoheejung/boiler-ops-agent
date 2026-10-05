@@ -19,6 +19,7 @@ class Settings:
 
     @classmethod
     def load(cls):
+        load_dotenv(".env.security", override=False)
         load_dotenv(override=False)
         required = ("BOILER_DATASET_PATH", "REPLAY_INTERVAL_MS", "KAFKA_BOOTSTRAP_SERVERS", "KAFKA_TOPIC")
         missing = [key for key in required if not os.getenv(key)]
