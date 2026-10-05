@@ -36,7 +36,7 @@ function Marker({ sensor, selected, onSelect }: { sensor: Sensor; selected: bool
 
 function MarkerLabel({ sensor, selected, onSelect, point }: { sensor: Sensor; selected: boolean; onSelect: () => void; point: [number, number] }) {
   const reading = useReading(sensor.tag);
-  return <button className={`scene-marker ${selected ? 'selected' : ''}`} data-testid={`marker-${sensor.tag}`} aria-label={`센서 ${sensor.tag}`} aria-pressed={selected} onClick={onSelect} style={{ left: point[0], top: point[1] }} title={`${sensor.tag} · ${sensor.mapping_confidence}`}>
+  return <button className={`scene-marker ${selected ? 'selected' : ''}`} data-testid={`marker-${sensor.tag}`} aria-label={`센서 ${sensor.tag} · ${sensor.equipment.toUpperCase()} · ${formatValue(reading)}`} aria-pressed={selected} onClick={onSelect} style={{ left: point[0], top: point[1] }} title={`${sensor.tag} · ${sensor.mapping_confidence}`}>
     <span>{sensor.equipment.toUpperCase()}</span><b>{formatValue(reading)}</b>
   </button>;
 }
@@ -67,8 +67,8 @@ export function BoilerViewport({ registry, selected, onSelect, onEquipment }: { 
   const fallback = <div className="fallback"><b>3D VIEW UNAVAILABLE</b><p>설비 목록에서 센서를 선택할 수 있습니다.</p><span>{telemetry.status} · Kafka {telemetry.kafka}</span></div>;
   return <section className="viewport panel" aria-label="보일러 계통도">
     <div className="panel-heading"><div><span className="eyebrow">PLANT OVERVIEW</span><h2>Boiler operations</h2></div><span className="quiet">논리 계통도 · 실제 설비 좌표 아님</span></div>
-    <div className="scene" ref={box}>
-      {lost ? fallback : <SceneBoundary fallback={fallback}><Canvas camera={camera} shadows frameloop="demand" fallback={fallback} onCreated={({ gl }) => { gl.domElement.addEventListener('webglcontextlost', event => { event.preventDefault(); setLost(true); }); }}>
+    <p className="note scene-help">계통도와 동일한 설비를 아래 설비 선택 버튼에서 Tab과 Enter로 선택할 수 있습니다.</p><div className="scene" ref={box}>
+      {lost ? fallback : <SceneBoundary fallback={fallback}><Canvas camera={camera} shadows frameloop="demand" fallback={fallback} onCreated={({ gl }) => { gl.domElement.setAttribute('aria-hidden', 'true'); gl.domElement.addEventListener('webglcontextlost', event => { event.preventDefault(); setLost(true); }); }}>
         <color attach="background" args={['#edf0eb']} /><ambientLight intensity={1.5} /><directionalLight position={[5, 12, 6]} intensity={2} castShadow />
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -.04, 0]} receiveShadow><planeGeometry args={[24, 15]} /><meshStandardMaterial color="#e5e9e2" /></mesh>
         <gridHelper args={[24, 24, '#c7d1c6', '#d9e0d6']} />
@@ -79,10 +79,10 @@ export function BoilerViewport({ registry, selected, onSelect, onEquipment }: { 
         const vector = new Vector3(...sensor.scene_position!).project(camera);
         return <MarkerLabel key={sensor.tag} sensor={sensor} selected={selected === sensor.tag} onSelect={() => onSelect(sensor.tag)} point={[(vector.x + 1) * size.width / 2, (-vector.y + 1) * size.height / 2]} />;
       })}</div>}
-      <div className="scene-tools"><button aria-label="축소" onClick={() => setZoom(value => Math.max(.8, value - .1))}>−</button><span>{Math.round(zoom * 100)}%</span><button aria-label="확대" onClick={() => setZoom(value => Math.min(1.3, value + .1))}>+</button><button aria-label="왼쪽 이동" onClick={() => setPan(value => Math.max(-2, value - .5))}>←</button><button aria-label="오른쪽 이동" onClick={() => setPan(value => Math.min(2, value + .5))}>→</button><button onClick={() => { setZoom(1); setPan(0); }}>Reset</button></div>
+      <div className="scene-tools"><button disabled={zoom <= .8} aria-label="축소" onClick={() => setZoom(value => Math.max(.8, value - .1))}>−</button><span>{Math.round(zoom * 100)}%</span><button disabled={zoom >= 1.3} aria-label="확대" onClick={() => setZoom(value => Math.min(1.3, value + .1))}>+</button><button disabled={pan <= -2} aria-label="왼쪽 이동" onClick={() => setPan(value => Math.max(-2, value - .5))}>←</button><button disabled={pan >= 2} aria-label="오른쪽 이동" onClick={() => setPan(value => Math.min(2, value + .5))}>→</button><button onClick={() => { setZoom(1); setPan(0); }}>Reset</button></div>
       <div className="scene-caption">ISOMETRIC VIEW <span>01 / BOILER SYSTEMS</span></div>
     </div>
-    <nav className="equipment-nav" aria-label="설비 선택">{registry.equipment.map((item, index) => <button key={item.id} onClick={() => onEquipment(item.id)}><span>{String(index + 1).padStart(2, '0')}</span>{item.label}</button>)}</nav>
+    <nav className="equipment-nav" aria-label="설비 선택">{registry.equipment.map((item, index) => <button key={item.id} aria-pressed={registry.sensors[selected ?? ""]?.equipment === item.id} onClick={() => onEquipment(item.id)}><span>{String(index + 1).padStart(2, '0')}</span>{item.label}</button>)}</nav>
     <div className="process-flows">{registry.flows.map(flow => <div key={flow.id}><span>{flow.label}</span><small>{flow.equipment.join(' → ')}</small></div>)}</div>
   </section>;
 }

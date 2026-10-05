@@ -5,6 +5,8 @@ const empty: Snapshot = { type: 'telemetry', current: null, status: 'CONNECTING'
 let snapshot = empty;
 let connection = 'CONNECTING';
 let events: Telemetry[] = [];
+let paused = false;
+let latest = empty;
 const listeners = new Set<() => void>();
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
 const notify = () => listeners.forEach(listener => listener());
@@ -12,6 +14,20 @@ export const useTelemetry = () => useSyncExternalStore(subscribe, () => snapshot
 export const useConnection = () => useSyncExternalStore(subscribe, () => connection);
 export const useEvents = () => useSyncExternalStore(subscribe, () => events);
 export const useReading = (tag: string) => useSyncExternalStore(subscribe, () => snapshot.current?.sensors[tag]);
+export const usePaused = () => useSyncExternalStore(subscribe, () => paused);
+function applySnapshot(next: Snapshot) {
+  const current = next.current;
+  const previous = snapshot.current;
+  if (current && (!previous || previous.run_id !== current.run_id || previous.sequence !== current.sequence)) {
+    events = previous?.run_id === current.run_id ? [...events.slice(-119), current] : [current];
+  }
+  snapshot = next;
+}
+export function toggleUpdates() {
+  paused = !paused;
+  if (!paused) applySnapshot(latest);
+  notify();
+}
 export const formatValue = (reading?: Reading) => reading?.quality === 'parse_error' ? '파싱 오류' : reading?.value == null ? '—' : reading.value.toLocaleString('en-US', { maximumFractionDigits: 2 });
 
 export function connectTelemetry() {
@@ -28,12 +44,10 @@ export function connectTelemetry() {
       try {
         const next = JSON.parse(data) as Snapshot;
         if (next.type !== 'telemetry' || !('current' in next)) throw new Error('Invalid telemetry message');
-        const current = next.current;
-        const previous = snapshot.current;
-        if (current && (!previous || previous.run_id !== current.run_id || previous.sequence !== current.sequence)) {
-          events = previous?.run_id === current.run_id ? [...events.slice(-119), current] : [current];
-        }
-        snapshot = next; received = Date.now(); notify();
+        latest = next;
+        if (!paused) applySnapshot(next);
+        else snapshot = { ...next, current: snapshot.current };
+        received = Date.now(); notify();
       } catch {
         snapshot = { ...snapshot, status: 'ERROR', stale: true, error: 'WebSocket message parsing failed' }; notify();
       }
