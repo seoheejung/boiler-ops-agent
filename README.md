@@ -2,6 +2,8 @@
 
 한국중부발전의 공개 CSV를 실제 Kafka → FastAPI → WebSocket → React/R3F로 재생하는 보일러 모니터링 프로젝트.
 
+[그림으로 보는 프로젝트 지도와 실행 가이드](docs/index.html): `docs/index.html`을 브라우저에서 열면 코드 지도, 타입·호출 흐름, 구현 전 설계 절차, 확인 방법과 후속 과제를 볼 수 있다.
+
 ## 현재 상태
 
 **Phase 1~7 구현, Phase별 README 갱신·개별 커밋 및 로컬 통합 E2E 검증 완료.**
@@ -58,11 +60,15 @@ node scripts/e2e.mjs
 ```
 
 E2E는 8000/4173 포트와 고유 Kafka Topic을 사용하고 종료 시 자신이 시작한 프로세스를 종료한다.
+4173을 다른 프로젝트가 사용 중이면 `$env:E2E_FRONTEND_PORT = '4176'`처럼 빈 화면 포트를 지정한다. 사용 중인 포트는 테스트 시작 전에 오류로 중단한다.
 Phase 7은 프로젝트 Kafka를 일시 중단·복구한다. 이 Compose Broker를 별도 운영 작업과 공유하지 않는다.
 실제 입력 해시, 선택 구간의 16행, WebSocket 이벤트, 결과 JSON, 화면 캡처를 `artifacts/e2e/phaseN/`에 남긴다.
 Phase 5~7은 학습 이후 시험 구간을 사용한다. `E2E_PHASE=phase1`부터 `phase7`까지 선택할 수 있다.
 최종 승인 검증: 무승인 변경 0건, 승인 우회 0건, 거절 후 실행 0건, 실행 Trace 기록률 100%.
 결과 문서는 `docs/results/`에서 확인한다. 단위 테스트는 만들지 않는다.
+
+화면·접근성 결과: [Phase 7 UI 검수](docs/results/phase7-ui-accessibility-review.md). 문서 페이지의 브라우저 검수는 `node scripts/review-ui.mjs`로 별도 실행한다.
+적대적 환경 검토: [보안 감사와 미해결 과제](docs/results/phase7-security-audit.md). 기존 승인 검증 통과는 외부 배포의 안전성을 의미하지 않는다.
 
 ## 로컬 AI Agent
 

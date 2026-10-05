@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="BoilerOps Agent의 실시간 데이터 흐름, 코드 지도, 타입과 호출 계약, 로컬 실행·검증 방법, 향후 설계와 보안 과제를 그림으로 살펴봅니다.">
+  <meta name="theme-color" content="#edf1e9">
+  <link rel="icon" type="image/svg+xml" href="../frontend/public/favicon.svg">
+  <title>프로젝트 지도와 실행 가이드 · BoilerOps Agent</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#243d30;background:#f4f5ef;line-height:1.75;--ink:#243d30;--muted:#536452;--line:#cbd5c6;--accent:#765016}
+    *{box-sizing:border-box;min-width:0}body{margin:0;overflow-wrap:anywhere}a{color:#285b43;text-underline-offset:4px}a:hover{color:#765016}button,summary{font:inherit;cursor:pointer}a:focus-visible,summary:focus-visible,button:focus-visible{outline:3px solid #765016;outline-offset:4px}html{scroll-padding-top:20px}h1,h2,h3,p,figure{margin-top:0}h1{font-size:clamp(2.3rem,4.2vw,3.8rem);word-break:keep-all;line-height:1.18;letter-spacing:-.06em;margin-bottom:24px}h2{font-size:clamp(1.6rem,3vw,2.2rem);letter-spacing:-.04em}h3{font-size:1.1rem}code,pre{font-family:Consolas,monospace;font-size:.88rem}code{overflow-wrap:anywhere}pre{padding:20px;background:#edf1e9;border:1px solid var(--line);white-space:pre-wrap;word-break:break-word;border-radius:8px}small,.muted{color:var(--muted)}header{padding:22px max(20px,calc((100vw - 1400px)/2));border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}header a{text-decoration:none;font-weight:750;font-size:1.25rem}.brand-mark{display:inline-grid;place-items:center;background:var(--ink);color:white;width:34px;height:34px;border-radius:7px;margin-right:10px}header span:last-child{font-size:.85rem;color:var(--muted)}.layout{max-width:1440px;margin:auto;display:grid;grid-template-columns:230px minmax(0,1fr);gap:44px;padding:40px 24px}.toc{position:sticky;top:24px;align-self:start}.toc summary{padding:12px 0;font-weight:650}.toc a{display:block;padding:10px 12px;text-decoration:none;border-left:2px solid var(--line)}.toc a:hover{background:#e8eee2;border-color:var(--ink)}main>section{padding:48px 0;border-bottom:1px solid var(--line)}main>section:first-child{padding-top:15px}.eyebrow{font:600 .78rem Consolas,monospace;letter-spacing:.14em;color:var(--muted);margin-bottom:16px}.lead{font-size:1.15rem;max-width:760px}.badges{display:flex;flex-wrap:wrap;gap:8px;margin:24px 0}.badge{padding:5px 12px;background:#e5ecdf;border:1px solid #c3d0bb;border-radius:30px;font-size:.8rem}.badge.review{background:#f5ead6;border-color:#ddc39b;color:#654319}.hero-grid,.two{display:grid;grid-template-columns:1fr 1fr;gap:24px}.hero-grid{grid-template-columns:1.2fr 1fr;align-items:center}.hero-art{width:100%;height:auto}.card{padding:24px;background:#fff;border:1px solid var(--line);border-radius:10px}.card h3{margin-bottom:10px}.card p:last-child{margin-bottom:0}.callout{border-left:4px solid #8d652c;background:#f4eddf;padding:16px 20px;margin:24px 0}.flow{display:flex;gap:12px;align-items:stretch;padding:0;list-style:none;counter-reset:flow}.flow>li{flex:1;background:#fff;border:1px solid var(--line);padding:18px 14px;border-radius:8px;position:relative}.flow>li:not(:last-child)::after{content:'→';position:absolute;right:-12px;top:20px;z-index:1;color:#345e42}.flow b,.flow small{display:block}.flow small{font-size:.77rem}.legend{display:flex;gap:20px;flex-wrap:wrap;font-size:.85rem}.pip{display:inline-block;width:10px;height:10px;border-radius:50%;background:#42694e;margin-right:7px}.pip.amber{background:#986523}.swimlane{border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:24px 0}.lane{display:grid;grid-template-columns:110px 1fr;gap:16px;padding:20px;background:white;border-bottom:1px solid var(--line)}.lane:last-child{border:0}.lane-name{font-weight:700;color:#35563c}.lane p{margin:0}.lane code{display:inline-block;background:#edf1e9;padding:2px 6px;margin:3px;border-radius:3px}.arrow{text-align:center;color:#765016;font-weight:700;margin:8px 0}.tree{padding:20px;background:#fff;border:1px solid var(--line);border-radius:8px}.tree ul{list-style:none;padding-left:20px;border-left:1px solid var(--line)}.tree li{padding:5px 0}.tree summary{padding:8px 0}.tree a{font-family:Consolas,monospace}.feature{margin-top:16px}.feature summary{padding:16px;background:#eaf0e3;border:1px solid var(--line);border-radius:6px;font-weight:650}.feature>div{padding:20px;background:#fff;border:1px solid var(--line);border-top:0}.contract{border-top:4px solid #42694e}.contract code{display:block;line-height:2}.contract .type{font-weight:700;color:#315d42}.diagram-caption{font-size:.85rem;color:var(--muted);margin-top:12px}.steps{padding-left:26px}.steps>li{padding:12px 0}.steps strong{display:block}.roadmap{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.roadmap article{border-top:3px solid #8d652c}.number{font:2rem Consolas,monospace;color:#65755f}.checklist{padding-left:22px}.checklist li{padding:6px 0}footer{max-width:1440px;margin:auto;border-top:1px solid var(--line);padding:24px;display:flex;gap:24px;flex-wrap:wrap;font-size:.85rem}.skip:not(:focus){position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}.skip:focus{position:fixed;top:12px;left:12px;background:white;padding:16px;z-index:5}.table{width:100%;border-collapse:collapse}th,td{padding:12px 8px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}caption{text-align:left;font-weight:650;padding:12px 0}.table code{font-size:.8rem}
+    @media(min-width:901px){.toc summary{list-style:none;pointer-events:none}.toc summary::-webkit-details-marker{display:none}}
+    @media(max-width:1100px){.hero-grid{grid-template-columns:1fr}.hero-art{max-width:480px;margin:auto}.flow{flex-wrap:wrap}.flow>li{flex-basis:28%}.roadmap{grid-template-columns:1fr}}
+    @media(max-width:900px){.layout{grid-template-columns:1fr;gap:8px;padding:16px}.toc{position:static;border-bottom:1px solid var(--line)}.toc nav{display:grid;grid-template-columns:1fr 1fr}.two{grid-template-columns:1fr}main>section{padding:32px 0}.lane{grid-template-columns:1fr;gap:4px}.hero-grid{gap:10px}.table{font-size:.82rem}.table th,.table td{padding:10px 4px}.card{padding:18px}}
+    @media(max-width:480px){.flow{display:grid;grid-template-columns:1fr}.flow>li:not(:last-child)::after{content:'↓';right:20px;top:auto;bottom:-18px}.hero-art{max-height:260px}.tree{padding:12px}.tree ul{padding-left:12px}.table th:first-child{width:28%}}
+    @media print{header,.toc,.skip,footer{display:none}.layout{display:block;padding:0}.card,pre,.lane{break-inside:avoid}details>div{display:block}a{color:inherit}.hero-art{max-width:360px}}
+  </style>
+</head>
+<body>
+<a class="skip" href="#main">본문으로 건너뛰기</a>
+<header><a href="index.html"><span class="brand-mark" aria-hidden="true">B</span>BoilerOps Agent</a><span>PROJECT FIELD GUIDE · 기준일 2026-10-05</span></header>
+<div class="layout">
+  <details class="toc" open><summary>프로젝트 메뉴</summary><nav aria-label="문서 목차"><a href="#overview">01 프로젝트 한눈에</a><a href="#architecture">02 데이터와 신뢰 경계</a><a href="#code">03 기능별 코드 지도</a><a href="#contracts">04 타입·호출 계약</a><a href="#design">05 구현 전 설계</a><a href="#run">06 직접 실행·확인</a><a href="#quality">07 접근성·보안 검수</a><a href="#next">08 추후 작업</a></nav></details>
+  <main id="main" tabindex="-1">
+    <section id="overview">
+      <div class="eyebrow">01 / UNDERSTAND THE SYSTEM</div>
+      <div class="hero-grid"><div><h1>한 행의 데이터가<br>운전 화면이 되기까지.</h1><p class="lead">공개 보일러 CSV를 시간순으로 재생하고, 센서·설비 문맥에서 관측값을 탐색합니다. AI는 검증된 조회 도구를 사용하며, Simulator 변경은 사람이 검토하고 승인합니다.</p><div class="badges"><span class="badge">Phase 1–7 로컬 E2E 완료</span><span class="badge">근거 추적 가능한 AI</span><span class="badge review">외부 배포 준비는 별도</span></div></div>
+        <svg class="hero-art" viewBox="0 0 480 360" role="img" aria-labelledby="hero-title hero-desc"><title id="hero-title">BoilerOps의 논리적 설비 탐색 화면</title><desc id="hero-desc">데이터 관측에서 AI 조회, 사람의 승인까지 이어지는 구조를 나타낸 개념도입니다. 실제 설비 형상이나 위치를 나타내지 않습니다.</desc><path d="M30 255 238 137 450 254 240 370Z" fill="#e0e7d8" transform="translate(0 -20)"/><path d="m90 220 160-90 120 66" fill="none" stroke="#9aa98d" stroke-width="2" stroke-dasharray="5 6"/><g stroke="#637c62" stroke-width="1.5"><path d="m118 195 0-95 64 34v97Z" fill="#76947c"/><path d="m118 100 62-34 63 34-61 34Z" fill="#bac9ad"/><path d="m182 134 61-34v97l-61 34Z" fill="#456c51"/><path d="m259 230 0-64 43 23v66Z" fill="#91a387"/><path d="m259 166 43-24 43 23-43 24Z" fill="#c0ccb5"/><path d="m302 189 43-24v65l-43 25Z" fill="#527455"/></g><g fill="#fff" stroke="#aebda4"><rect x="16" y="27" width="135" height="42" rx="7"/><rect x="303" y="49" width="157" height="42" rx="7"/><rect x="50" y="283" width="180" height="42" rx="7"/></g><g fill="#294633" font-family="system-ui,sans-serif" font-size="14"><text x="30" y="54">01 관측 데이터</text><text x="318" y="76">02 근거 기반 AI</text><text x="64" y="310">03 사람의 변경 승인</text></g><path d="M151 49H270L316 98M326 256 246 300" fill="none" stroke="#926527" stroke-width="2"/><circle cx="245" cy="300" r="5" fill="#926527"/><text x="255" y="342" fill="#536452" font-size="12">LOGICAL SYSTEM VIEW</text></svg>
+      </div>
+      <div class="two"><article class="card"><h3>현재 구현된 것</h3><p>CSV → Kafka → API → WebSocket → React/R3F, 센서 이력과 운전 분석, 로컬 Ollama Agent, 5분 온도 예측, 승인 기반 SQLite Simulator.</p><a href="results/phase7-integrated-validation.md">Phase 7 실제 검증 기록 →</a></article><article class="card"><h3>해석할 때의 경계</h3><p>50,400행의 과거 공개 데이터입니다. 센서 단위·실제 위치·안전 임계값은 미확인입니다. 2.5D 화면은 논리적 탐색 지도이며 Simulator는 <code>demo_bias</code> 승인 상태 머신입니다.</p></article></div>
+    </section>
+    <section id="architecture">
+      <div class="eyebrow">02 / FOLLOW ONE EVENT</div><h2>원본·관측·판단·변경의 경계</h2>
+      <ol class="flow" aria-label="실시간 데이터 처리 순서"><li><b>CSV</b><small>원본 Tag·시각 보존</small><code>csv_source.rows</code></li><li><b>Replay</b><small>run_id · sequence 부여</small><code>producer.replay</code></li><li><b>Kafka</b><small>단일 Partition</small><code>consume</code></li><li><b>BoilerState</b><small>검증·수치 변환·이력</small><code>apply → snapshot</code></li><li><b>React / R3F</b><small>WebSocket · 구독</small><code>useReading</code></li></ol>
+      <p class="diagram-caption">Backend가 원본 문자열을 검증해 Reading으로 변환합니다. 결측은 null, 파싱 실패는 parse_error로 유지합니다. 화면이 원본 CSV를 해석하지 않습니다.</p>
+      <div class="swimlane" aria-label="AI 조회와 승인 변경의 호출 흐름">
+        <div class="lane"><div class="lane-name">사용자</div><p>설비·센서 선택 → 질문 입력 → <code>POST /api/agent/query</code></p></div>
+        <div class="lane"><div class="lane-name">AI 조회</div><p><code>AgentQuery</code> → <code>query_agent</code> → Ollama의 도구 선택 → <code>ReadTools.call</code> → 근거 ID 선택 → 결과·Trace 저장</p></div>
+        <div class="lane"><div class="lane-name">제안</div><p>성공한 재열기 Trace + 요청 의도 → <code>Simulator.propose</code> → 모델의 increase / hold / decrease → 정책 검증 → pending 제안 저장</p></div>
+        <div class="lane"><div class="lane-name">사람의 승인</div><p>승인 자격 + 명시적 확인 + revision → <code>Simulator.decide</code> → SQLite 트랜잭션 → executed 또는 rejected + Audit</p></div>
+      </div>
+      <div class="callout">현재 승인 인증은 변경 결정 API에 적용됩니다. 조회·Trace·제안 API와 WebSocket의 외부 접근 통제는 부족합니다. <a href="results/phase7-security-audit.md">적대적 환경 보안 감사</a>에서 배포 전 과제를 확인하세요.</div>
+      <p>서비스 경계: 브라우저 ↔ FastAPI, Kafka ↔ Consumer, Backend ↔ 로컬 Ollama, Backend ↔ 파일·SQLite. 원본 데이터가 공개되어 있어도 사용자 질문·제안·승인 자격은 별도의 보호 대상입니다.</p>
+    </section>
+    <section id="code">
+      <div class="eyebrow">03 / FIND THE OWNER</div><h2>“이 기능은 어디서 도나?”</h2><p>파일 이름을 누르면 저장소의 해당 파일로 이동합니다. 이 HTML을 파일로 열어도 상대 경로 링크가 동작합니다.</p>
+      <div class="tree" aria-label="주요 소스 파일 트리">
+        <details open><summary><strong>backend/app/</strong> · 검증과 상태의 주인</summary><ul>
+          <li><a href="../backend/app/main.py">main.py</a> — lifespan, HTTP·WebSocket 진입점</li>
+          <li><a href="../backend/app/config.py">config.py</a> — 환경 설정과 필수값 검증</li>
+          <li><details open><summary>replay/ · 원본 재생</summary><ul><li><a href="../backend/app/replay/csv_source.py">csv_source.py</a> — 열·행·원본 시각 검사</li><li><a href="../backend/app/replay/producer.py">producer.py</a> — Kafka 발행</li></ul></details></li>
+          <li><a href="../backend/app/streaming/consumer.py">streaming/consumer.py</a> — 수신·검증·재연결</li>
+          <li><a href="../backend/app/domain/state.py">domain/state.py</a> — 현재값·이력·상태</li><li><a href="../backend/app/domain/registry.py">domain/registry.py</a> — 원본 Tag와 논리 설비 매핑</li><li><a href="../backend/app/domain/analysis.py">domain/analysis.py</a> — 실제·목표·변화율 비교</li><li><a href="../backend/app/websocket/hub.py">websocket/hub.py</a> — 구독 큐·overflow</li>
+          <li><a href="../backend/app/agent/service.py">agent/service.py</a> + <a href="../backend/app/agent/tools.py">tools.py</a> — 모델 스키마·조회 도구·근거 Trace</li>
+          <li><a href="../backend/app/forecast/train.py">forecast/train.py</a> + <a href="../backend/app/forecast/service.py">service.py</a> — 시간순 학습·추론</li>
+          <li><a href="../backend/app/simulator/service.py">simulator/service.py</a> — 제안·인증·승인·SQLite Audit</li>
+        </ul></details>
+        <details open><summary><strong>frontend/src/</strong> · 탐색과 표현의 주인</summary><ul>
+          <li><a href="../frontend/src/App.tsx">App.tsx</a> — 선택 상태·KPI·메뉴·패널 조합</li><li><a href="../frontend/src/telemetry.ts">telemetry.ts</a> + <a href="../frontend/src/types.ts">types.ts</a> — WebSocket 구독·타입·표시 일시정지</li><li><a href="../frontend/src/BoilerScene.tsx">BoilerScene.tsx</a> — 논리 계통도·설비 버튼·WebGL 대체 UI</li><li><a href="../frontend/src/SensorTrend.tsx">SensorTrend.tsx</a> — 추이 SVG와 원본값 표</li><li><a href="../frontend/src/OperationsAnalysis.tsx">OperationsAnalysis.tsx</a> / <a href="../frontend/src/ForecastPanel.tsx">ForecastPanel.tsx</a> — 분석·예측 API 조회</li><li><a href="../frontend/src/AgentPanel.tsx">AgentPanel.tsx</a> / <a href="../frontend/src/SimulatorPanel.tsx">SimulatorPanel.tsx</a> — 질문·제안·사람의 승인</li><li><a href="../frontend/src/NotFound.tsx">NotFound.tsx</a> / <a href="../frontend/src/accessibility.css">accessibility.css</a> — 잘못된 경로·접근성·반응형 표시</li>
+        </ul></details>
+        <details><summary><strong>실행·검증·기획</strong></summary><ul><li><a href="../docker-compose.yml">docker-compose.yml</a> — 로컬 Kafka</li><li><a href="../scripts/e2e.mjs">scripts/e2e.mjs</a> + <a href="../scripts/phase7.mjs">phase7.mjs</a> — 실제 시스템 E2E</li><li><a href="../scripts/review-ui.mjs">scripts/review-ui.mjs</a> — 문서·모바일·키보드 브라우저 검수</li><li><a href="../.project/plan.md">.project/plan.md</a> — 범위와 Phase 경계</li><li><a href="../DESIGN.md">DESIGN.md</a> — 화면 원칙</li><li><a href="../AGENTS.md">AGENTS.md</a> — 작업 규칙</li></ul></details>
+      </div>
+      <details class="feature" open><summary>센서를 클릭했는데 값이 이상하다면</summary><div><p><code>BoilerViewport / KPI / sensor-list</code> → <code>App.selected</code> → <code>registry.sensors[tag]</code> + <code>telemetry.current.sensors[tag]</code> → Inspector.</p><p>위치·분류는 registry.py, 숫자·quality는 state.py, 연결 상태는 telemetry.ts부터 확인합니다. 추이는 별도로 <code>GET /api/sensors/history?tag=…</code>를 조회합니다.</p></div></details>
+      <details class="feature"><summary>Agent 답변의 숫자는 어디서 왔나</summary><div><p><code>AgentPanel.ask()</code> → <code>agent_query(request: AgentQuery)</code> → <code>ReadTools</code> → <code>query_agent(request, tools)</code>. 모델은 허용된 도구와 근거 ID를 선택합니다. 응답 숫자는 도구 결과에서 구성합니다.</p><p><code>GET /api/agent/traces/{trace_id}</code>의 calls·evidence·path를 따라 수치를 대조합니다. 모델 오류는 503과 실패 Trace로 남습니다.</p></div></details>
+      <details class="feature"><summary>승인 버튼이 Simulator 값을 바꾸는 경로</summary><div><p><code>SimulatorPanel.decide(proposal, approve)</code> → <code>POST /api/simulator/proposals/{id}/decision</code> → <code>Simulator.decide</code>. 인증·confirm·만료·revision·정책을 검사한 후 하나의 SQLite 트랜잭션에서 값과 Audit를 갱신합니다.</p><p>화면 버튼 비활성화는 편의 기능입니다. 쓰기 허용 여부는 Backend가 결정합니다.</p></div></details>
+    </section>
+    <section id="contracts">
+      <div class="eyebrow">04 / TYPES BEFORE IMPLEMENTATION</div><h2>타입과 호출을 먼저 연결하기</h2><p>아래는 <strong>현재 코드에서 추린 계약</strong>입니다. Python의 일부 함수는 타입 주석 없이 dict를 반환하므로, 도식의 출력 모양을 이미 구현된 Python 타입 선언으로 해석하지 않습니다.</p>
+      <div class="two"><article class="card contract"><h3>원본 이벤트 → 관측값</h3><code class="type">Raw event · Python dict</code><code>run_id: string<br>sequence: integer<br>source_time, emitted_at: string<br>measurements: Record&lt;Tag, string&gt;</code><p class="arrow" aria-label="BoilerState.apply가 변환">↓ BoilerState.apply(event, offset)</p><code class="type">Reading · types.ts</code><code>value: number | null<br>raw: string<br>quality: valid | missing | parse_error<br>error: string | null</code></article><article class="card contract"><h3>화면에 전달하는 계약</h3><code class="type">Snapshot · types.ts</code><code>type: 'telemetry'<br>current: Telemetry | null<br>status, kafka: string<br>stale: boolean<br>error: string | null</code><p class="arrow">↓ /api/ws → connectTelemetry()</p><code>useTelemetry() → Snapshot<br>useReading(tag: string) → Reading | undefined<br>usePaused() → boolean</code><p class="muted">표시는 고정할 수 있지만 서버 수집과 Agent 도구 조회는 계속됩니다.</p></article></div>
+      <div class="two" style="margin-top:24px"><article class="card contract"><h3>질문 계약 · Pydantic</h3><code class="type">AgentQuery</code><code>question: str (1–1000)<br>equipment: str (1–40)<br>tag: str | None (≤200)<br>extra = forbid</code><p class="arrow">↓ query_agent(request, tools)</p><p>결과: trace_id, assessment, evidence, answer, status. 실패: AgentFailure → HTTP 503.</p></article><article class="card contract"><h3>변경 결정 계약 · Pydantic</h3><code class="type">Decision</code><code>approve: StrictBool<br>confirm: StrictBool<br>expected_revision: int ≥ 0 (strict)<br>extra = forbid</code><p class="arrow">↓ decide(proposal_id, decision, authorization)</p><p>결과: proposal_id, status, value, revision. 값은 요청 본문이 아니라 저장된 제안에서 읽습니다.</p></article></div>
+      <table class="table"><caption>주요 사용자 행동과 호출 진입점</caption><thead><tr><th scope="col">행동</th><th scope="col">인터페이스</th><th scope="col">책임</th></tr></thead><tbody><tr><th scope="row">초기 진입</th><td><code>GET /api/registry</code></td><td>원본 Tag와 설비 관계</td></tr><tr><th scope="row">실시간 관측</th><td><code>WS /api/ws</code></td><td>Snapshot 전달과 연결 상태</td></tr><tr><th scope="row">운전 분석</th><td><code>GET /api/analysis/loop</code></td><td>동일 시각의 값 비교</td></tr><tr><th scope="row">온도 예측</th><td><code>GET /api/forecast</code></td><td>cutoff 이후 입력으로 추론</td></tr><tr><th scope="row">질문</th><td><code>POST /api/agent/query</code></td><td>검증된 읽기와 근거 연결</td></tr><tr><th scope="row">변경 제안</th><td><code>POST /api/simulator/proposals</code></td><td>의도·정책·현재 revision 고정</td></tr><tr><th scope="row">승인·거절</th><td><code>POST …/{id}/decision</code></td><td>인증·검증·원자적 결정</td></tr></tbody></table>
+    </section>
+    <section id="design">
+      <div class="eyebrow">05 / DISCUSS BEFORE CODING</div><h2>다음 변경은 이 순서로 설계합니다</h2><p>여기는 <strong>향후 작업을 논의하는 절차와 예시</strong>입니다. 아래 보안 구조는 아직 구현되지 않았습니다. 기능 범위가 바뀌면 먼저 <code>.project/plan.md</code>를 합의해 갱신합니다.</p>
+      <ol class="flow"><li><b>① 행동·실패</b><small>누가 무엇을 하는가?<br>누락·중복·오래된 상태는?</small></li><li><b>② 타입·서명</b><small>입력·출력·오류 계약<br>권한·근거의 주인은?</small></li><li><b>③ 호출 그림</b><small>신뢰 경계를 표시하고<br>상태 변경 위치를 고정</small></li><li><b>④ 합의·구현</b><small>관찰할 결과와 E2E<br>아티팩트부터 정하기</small></li></ol>
+      <div class="two"><article class="card"><h3>논의 예시: 사용자별 승인</h3><pre>검토용 계약 — 미구현
+
+Principal { user_id, roles }
+ApprovalContext {
+  proposal_id, expected_revision,
+  evidence_id, expires_at
+}
+authorize(principal, action, resource)
+  → Allowed | Denied(reason)
+decide(context, decision, principal)
+  → DecisionReceipt | Conflict</pre><p>기존 공유 토큰을 교체할 때 역할·자원 소유권·만료·감사 주체를 먼저 확정합니다. 타입만 새로 추가해 두지 않습니다.</p></article><article class="card"><h3>논의할 호출 흐름</h3><ol class="steps"><li><strong>브라우저 → 인증 경계</strong>실제 사용자 신원과 Origin 확인</li><li><strong>API → 권한·근거 검증</strong>해당 제안의 검토 권한, 근거 시점, 요청 한도</li><li><strong>트랜잭션 → 감사 기록</strong>한 번만 실행하고 검토한 내용과 결정을 연결</li><li><strong>결과 → 사용자 피드백</strong>성공·충돌·거절을 키보드와 스크린리더로 확인</li></ol></article></div>
+      <p>설계 리뷰 산출물: 파일 변경 목록, 타입/함수 서명 그림, 성공·실패 호출 흐름, 권한 표, 사용자 관점 E2E 입력과 기대 결과.</p>
+    </section>
+    <section id="run">
+      <div class="eyebrow">06 / TRY IT LOCALLY</div><h2>직접 확인하는 순서</h2><p>저장소 루트에서 PowerShell을 사용합니다. Python 3.13, uv, Node.js 22.12 이상, Docker Desktop과 로컬 Ollama가 필요합니다. 기존 환경이 준비되어 있으면 설치 단계는 건너뜁니다.</p>
+      <details class="feature"><summary>처음 준비: 데이터·환경·기존 의존성</summary><div><p>원본 CSV를 <code>data/raw/</code>에 배치하고 <code>.env.example</code>을 복사해 필수 환경값을 설정합니다. 실제 승인 토큰은 문서·Git·로그에 기록하지 않습니다.</p><pre>New-Item -ItemType Directory -Force data/raw
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+uv sync --frozen
+npm.cmd ci --prefix frontend
+ollama list</pre><p>필수 환경값: BOILER_DATASET_PATH, REPLAY_INTERVAL_MS, KAFKA_BOOTSTRAP_SERVERS, KAFKA_TOPIC. Agent에는 OLLAMA_BASE_URL, OLLAMA_MODEL도 필요합니다. 모델이 없으면 <code>ollama pull qwen2.5-coder:7b</code>로 별도 준비합니다.</p></div></details>
+      <ol class="steps"><li><strong>터미널 1 · Kafka와 API</strong><pre>docker compose up -d --wait kafka
+uv run python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000</pre></li><li><strong>터미널 2 · 프런트엔드</strong><pre>npm.cmd run dev --prefix frontend</pre><p>Vite가 출력하는 주소로 접속합니다. 기본 주소는 <code>http://127.0.0.1:5173</code>이며 포트 충돌 시 달라질 수 있습니다.</p></li><li><strong>터미널 3 · 원본 재생</strong><pre>uv run python -m backend.app.replay.producer --limit 16</pre><p>LIVE와 sequence 증가, KPI와 선택 센서 값 일치, 재생 종료 후 STALE을 확인합니다.</p></li></ol>
+      <div class="two"><article class="card"><h3>예측과 Agent 확인</h3><pre>uv run python -m backend.app.forecast.train
+$env:REPLAY_START_ROW = '42841'
+uv run python -m backend.app.replay.producer --limit 16</pre><p>현재 데이터의 시험 시작 행입니다. 새 데이터에서는 학습 보고서의 test_start_row를 사용합니다. 재열기 센서를 선택하고 Agent 조회 → 답변의 Trace를 확인하세요.</p></article><article class="card"><h3>승인과 거절 확인</h3><p>API 실행 전에 <code>SIMULATOR_APPROVAL_TOKEN</code>을 최소 32자의 임의 값으로 설정합니다. 재열기 Agent 조회 후 제안 생성 → 변경값 검토 → 토큰 입력 → 확인 체크 → 승인 또는 거절합니다.</p><p>승인 시 demo_bias와 revision이 갱신되고, 거절 시 값이 유지되는지 Audit에서 확인합니다. 테스트 종료 후 임시 토큰은 폐기합니다.</p></article></div>
+      <details class="feature" open><summary>반복 가능한 검증과 결과 파일</summary><div><pre>npm.cmd run build --prefix frontend
+$env:E2E_PHASE = 'phase7'
+node scripts/e2e.mjs
+node scripts/review-ui.mjs</pre><p>Chromium이 준비되지 않았다면 <code>cd frontend; npx.cmd playwright install chromium</code> 후 루트로 돌아옵니다. Phase 7 E2E는 API 8000과 화면 4173 포트를 사용합니다. 4173이 사용 중이면 실행 전에 <code>$env:E2E_FRONTEND_PORT = '4176'</code>처럼 빈 포트를 지정하세요. 프로젝트 Kafka를 일시 중단·복구합니다. 공유 Broker에서는 실행하지 마세요.</p><p><code>artifacts/e2e/phase7/run.json</code>의 passed와 checks, <code>safety-counters.json</code>, 화면 캡처를 대조합니다. UI 검수는 <code>artifacts/e2e/phase7/ui-review/</code>에 별도로 기록됩니다. 생성물은 Git에서 제외됩니다.</p></div></details>
+      <p>이 문서만 보려면 파일 탐색기에서 <code>docs/index.html</code>을 여세요. 외부 CDN이나 문서용 서버가 필요하지 않습니다.</p>
+    </section>
+    <section id="quality">
+      <div class="eyebrow">07 / VERIFY THE BOUNDARIES</div><h2>접근성·화면 품질·보안</h2>
+      <div class="two"><article class="card"><h3>키보드와 스크린리더</h3><ul class="checklist"><li>첫 Tab의 본문 건너뛰기, 메뉴, 설비 버튼, 입력·승인 순서 확인</li><li>Canvas와 같은 기능의 HTML 설비 목록 제공</li><li>추이 SVG의 이름·요약·원본 표 제공</li><li>조회·변경 성공과 오류를 상태 영역으로 안내</li><li>320px 화면, 확대·글자 간격 증가, 모바일 메뉴와 404 확인</li></ul><a href="results/phase7-ui-accessibility-review.md">검수 범위와 실제 결과 →</a><p class="muted">브라우저 접근성 트리 검증과 실제 NVDA/VoiceOver 낭독 검증은 구분합니다. 전체 WCAG 적합성을 인증하는 문서가 아닙니다.</p></article><article class="card"><h3>적대적 환경의 보안</h3><p>익명 API 소비자, 악성 웹사이트, 로컬 내부자, 승인 토큰 보유자를 구분해 검토합니다. 조회·제안 인증, WebSocket Origin, 자원 한도, Kafka 입력 신뢰와 승인 근거의 재사용을 주요 경계로 봅니다.</p><a href="results/phase7-security-audit.md">취약점·공격 연쇄·개선 설계 →</a><p class="muted">기존 승인 E2E의 “우회 0건”은 해당 시나리오 결과입니다. 전체 보안 취약점이 없다는 뜻은 아닙니다.</p></article></div>
+      <p>그림은 HTML/CSS와 작은 SVG로 표현합니다. 앱·문서에는 압축 대상인 사진 자산이 없으며, E2E 캡처는 증거 파일로 따로 보관합니다.</p>
+    </section>
+    <section id="next">
+      <div class="eyebrow">08 / THE NEXT DECISIONS</div><h2>추후 필요한 작업</h2><p>아래 항목은 현재 완료 범위에 추가할 <strong>검토 과제</strong>입니다. 새 Phase가 시작되거나 배포가 승인된 상태는 아닙니다.</p>
+      <div class="roadmap"><article class="card"><div class="number">01</div><h3>외부 노출 전 접근 경계</h3><p>사용자 인증·역할과 자원 권한, WebSocket Origin, 요청·연결·모델 동시 실행 한도, TLS와 보안 헤더를 설계합니다.</p><small>완료 판단: 비인가 요청·과도한 요청·교차 출처 시나리오에서 차단과 감사 기록.</small></article><article class="card"><div class="number">02</div><h3>증거와 데이터의 신뢰</h3><p>Kafka 생산자 인증·ACL, 승인 근거의 유효 기간·세션 연결, Trace·모델 파일 보호와 보존 정책을 정합니다.</p><small>완료 판단: 위조 run·오래된 Trace·변조 파일의 안전한 거부.</small></article><article class="card"><div class="number">03</div><h3>실사용 검증과 예측 개선</h3><p>NVDA/VoiceOver 실제 낭독 검수, 터치 기기 확인, 기간별 예측 오차·Naive 비교, 확인 가능한 단위·센서 근거 보완.</p><small>완료 판단: 재현 가능한 접근성 기록과 독립 시험 구간의 성능 보고서.</small></article></div>
+      <div class="callout">현재 선형 모델 시험 MAE는 0.105784로 Naive 0.033211보다 큽니다. 예측을 산업 제어 권고로 확장하기 전에 데이터와 모델의 적합성을 먼저 검증해야 합니다. <a href="results/phase5-temperature-forecast.md">예측 평가 근거</a></div>
+    </section>
+  </main>
+</div>
+<footer><span>© <span id="year">2026</span> BoilerOps Agent</span><a href="../README.md">README</a><a href="../.project/plan.md">프로젝트 계획</a><a href="results/phase7-integrated-validation.md">통합 검증 결과</a><a href="#main">본문 처음으로</a></footer>
+<script>
+  document.getElementById('year').textContent = new Date().getFullYear();
+  const menu = document.querySelector('.toc');
+  const mobile = matchMedia('(max-width: 900px)');
+  const adaptMenu = () => { menu.open = !mobile.matches; };
+  adaptMenu(); mobile.addEventListener('change', adaptMenu);
+  menu.addEventListener('keydown', event => { if (event.key === 'Escape' && mobile.matches) { menu.open = false; menu.querySelector('summary').focus(); } });
+  menu.querySelectorAll('a').forEach(link => link.addEventListener('click', () => { if (mobile.matches) { menu.open = false; const section = document.querySelector(link.hash); section.tabIndex = -1; section.focus(); } }));
+</script>
+</body>
+</html>
