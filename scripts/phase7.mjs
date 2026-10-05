@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-export async function validateFailures({ page, context, env, out, root, python, poll, pass, restartBackend }) {
+export async function validateFailures({ page, context, env, out, root, python, poll, pass, frontendUrl, restartBackend }) {
   const base = 'http://127.0.0.1:8000';
   const observations = [];
   const json = async path => (await fetch(base + path)).json();
@@ -60,7 +60,7 @@ export async function validateFailures({ page, context, env, out, root, python, 
       if (mode === 'position') sensor.scene_position = [999999, 0, 0]; else sensor.tag = 'WRONG_TAG';
       await route.fulfill({ response, json: registry });
     });
-    await corrupted.goto('http://127.0.0.1:4173');
+    await corrupted.goto(frontendUrl);
     await corrupted.getByRole('alert').filter({ hasText: mode === 'position' ? 'Scene Position 오류' : 'Tag Mapping 오류' }).waitFor();
     await corrupted.screenshot({ path: resolve(out, `invalid-${mode}.png`), fullPage: true });
     await corrupted.close();
@@ -69,14 +69,14 @@ export async function validateFailures({ page, context, env, out, root, python, 
   for (const equipment of registry.equipment) {
     const tag = Object.values(registry.sensors).find(sensor => sensor.equipment === equipment.id && sensor.scene_position && sensor.representative)?.tag;
     if (!tag) continue;
-    await page.getByRole('button', { name: `센서 ${tag}`, exact: true }).click();
+    await page.getByRole('button', { name: `센서 ${tag}`, exact: false }).click();
     const value = await page.getByTestId('inspector-value').textContent();
     assert.ok((await page.getByTestId(`marker-${tag}`).textContent()).includes(value));
     assert.equal(await page.getByTestId('inspector-tag').textContent(), tag);
   }
   const loss = await context.newPage();
-  await loss.goto('http://127.0.0.1:4173');
-  await loss.getByRole('button', { name: '센서 총 주증기 유량', exact: true }).waitFor();
+  await loss.goto(frontendUrl);
+  await loss.getByRole('button', { name: '센서 총 주증기 유량', exact: false }).waitFor();
   await loss.evaluate(() => {
     const canvas = document.querySelector('canvas');
     const gl = canvas.getContext('webgl2');

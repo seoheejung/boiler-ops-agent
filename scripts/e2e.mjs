@@ -4,11 +4,17 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
+import { createServer } from 'node:net';
 import { chromium } from '../frontend/node_modules/playwright/index.mjs';
 import { validateFailures } from './phase7.mjs';
+import { reviewApplication } from './review-ui.mjs';
+import { reviewSecurity } from './security-review.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const phase = process.env.E2E_PHASE ?? 'phase1';
+const frontendPort = Number(process.env.E2E_FRONTEND_PORT ?? '4173');
+assert.ok(Number.isInteger(frontendPort) && frontendPort > 1023 && frontendPort <= 65535 && frontendPort !== 8000, 'Invalid E2E_FRONTEND_PORT');
+const frontendUrl = `http://127.0.0.1:${frontendPort}`;
 const out = resolve(root, 'artifacts/e2e', phase);
 mkdirSync(out, { recursive: true });
 const dataset = process.env.BOILER_DATASET_PATH ?? resolve(root, 'data/raw', readdirSync(resolve(root, 'data/raw')).find(file => file.endsWith('.csv')));
@@ -37,6 +43,13 @@ async function poll(fn, label, timeout = 30000) {
 function pass(name) { checks.push({ name, passed: true }); console.log(`PASS ${name}`); }
 const result = { phase, started_at: new Date().toISOString(), checks, topic: env.KAFKA_TOPIC };
 try {
+  for (const port of [8000, frontendPort]) {
+    await new Promise((resolve, reject) => {
+      const probe = createServer();
+      probe.once('error', error => reject(new Error(`E2E port ${port} unavailable: ${error.message}`)));
+      probe.listen(port, '127.0.0.1', () => probe.close(resolve));
+    });
+  }
   let forecastModel;
   if (Number(phase.replace('phase', '')) >= 5) {
     env.FORECAST_MODEL_PATH = resolve(out, 'forecast-model.json');
@@ -48,9 +61,9 @@ try {
   result.input_sha256 = profile.sha256;
   const apiArgs = ['-m', 'uvicorn', 'backend.app.main:app', '--host', '127.0.0.1', '--port', '8000'];
   let backend = start(python, apiArgs, 'backend');
-  start(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4173', '--strictPort'], 'frontend', resolve(root, 'frontend'));
+  start(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', String(frontendPort), '--strictPort'], 'frontend', resolve(root, 'frontend'));
   await poll(async () => (await (await fetch('http://127.0.0.1:8000/api/health')).json()).kafka === 'CONNECTED', 'Kafka consumer readiness');
-  await poll(async () => (await fetch('http://127.0.0.1:4173')).ok, 'frontend readiness');
+  await poll(async () => (await fetch(frontendUrl)).ok, 'frontend readiness');
   browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const context = await browser.newContext({ viewport: { width: 1500, height: 1100 } });
   page = await context.newPage();
@@ -60,12 +73,20 @@ try {
     const event = JSON.parse(payload.toString());
     if (event.current) telemetry.set(`${event.current.run_id}:${event.current.sequence}`, event.current);
   }));
-  await page.goto('http://127.0.0.1:4173');
+  await page.goto(frontendUrl);
   await poll(async () => await page.getByTestId('ws-status').textContent() === 'CONNECTED', 'WebSocket connected');
   start(python, ['-m', 'backend.app.replay.producer', '--limit', '16'], 'producer');
   await poll(async () => Number(await page.getByTestId('sequence').textContent()) >= 4, 'live UI');
   assert.match(await page.getByTestId('stream-status').textContent(), /LIVE/);
   await page.screenshot({ path: resolve(out, 'dashboard.png'), fullPage: true });
+  if (phase === 'phase7') {
+    await page.getByRole('button', { name: '화면 자동 갱신 일시정지', exact: true }).click();
+    const frozenSequence = await page.getByTestId('sequence').textContent();
+    await poll(() => [...telemetry.values()].some(event => event.sequence === 16), 'stream continues while display paused');
+    assert.equal(await page.getByTestId('sequence').textContent(), frozenSequence);
+    await page.getByRole('button', { name: '화면 자동 갱신 재개', exact: true }).click();
+    pass('Display pause preserves shown values while WebSocket continues; resume catches up');
+  }
   await poll(async () => await page.getByTestId('sequence').textContent() === '16', 'final sequence');
   const expected = profile.first_rows[15];
   for (const row of profile.first_rows) {
@@ -104,7 +125,7 @@ try {
       return original.call(this, type, ...args);
     };
   });
-  await fallback.goto('http://127.0.0.1:4173');
+  await fallback.goto(frontendUrl);
   await fallback.getByText('3D VIEW UNAVAILABLE').waitFor();
   await fallback.getByRole('button', { name: '02 Furnace', exact: true }).click();
   await fallback.getByTestId('inspector-tag').waitFor();
@@ -119,7 +140,7 @@ try {
       if (sensor.scene_position) assert.equal(sensor.scene_position.every(Number.isFinite), true);
     }
     const tag = '급탄기 A 속도 평균값 ';
-    await page.getByRole('button', { name: `센서 ${tag}`, exact: true }).click();
+    await page.getByRole('button', { name: `센서 ${tag}`, exact: false }).click();
     assert.equal(await page.getByTestId('inspector-tag').textContent(), tag);
     await page.getByRole('img', { name: `${tag} 최근 추이` }).waitFor();
     const history = await (await fetch(`http://127.0.0.1:8000/api/sensors/history?tag=${encodeURIComponent(tag)}`)).json();
@@ -180,7 +201,7 @@ try {
     assert.equal(await page.getByTestId('forecast-value').textContent(), forecast.prediction.toFixed(2));
     const tool = await (await fetch('http://127.0.0.1:8000/api/tools/get_temperature_forecast?equipment=reheater')).json();
     assert.equal(tool.prediction, forecast.prediction);
-    await page.getByRole('button', { name: '센서 최종재열기 입구 온도 평균값', exact: true }).click();
+    await page.getByRole('button', { name: '센서 최종재열기 입구 온도 평균값', exact: false }).click();
     await page.getByLabel('질문', { exact: true }).fill('Use get_temperature_forecast to report the 5-minute predicted temperature. Cite prediction evidence.');
     const agentResponse = page.waitForResponse(response => response.url().endsWith('/api/agent/query'), { timeout: 360000 });
     await page.getByRole('button', { name: 'Agent 조회', exact: true }).click();
@@ -231,12 +252,16 @@ try {
     pass('Real model proposal, authenticated explicit browser approval, immutable decision, rejection and complete write audit');
   }
   if (phase === 'phase7') {
-    await validateFailures({ page, context, env, out, root, python, poll, pass, restartBackend: async () => {
+    await validateFailures({ page, context, env, out, root, python, poll, pass, frontendUrl, restartBackend: async () => {
       backend.kill();
       await new Promise(resolve => backend.once('exit', resolve));
       backend = start(python, apiArgs, 'backend-persistence');
       await poll(async () => (await fetch('http://127.0.0.1:8000/api/health')).ok, 'backend restarted');
     } });
+    await reviewApplication(page, context, resolve(out, 'ui-review'));
+    pass('Keyboard navigation, mobile reflow, named controls, accessibility trees and custom 404');
+    await reviewSecurity({ context, out });
+    pass('Security review observations recorded; anonymous approval remains blocked');
   }
   assert.deepEqual(errors, []);
   if (env.SIMULATOR_APPROVAL_TOKEN) {

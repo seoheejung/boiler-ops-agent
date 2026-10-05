@@ -4,6 +4,8 @@
 `npm.cmd run build --prefix frontend`의 TypeScript/Vite 빌드 통과.
 실제 원본 CSV, Kafka 3.9.1, FastAPI, Chromium, Ollama qwen2.5-coder:7b, SQLite를 사용했다.
 
+같은 날 화면·접근성 보완 후 `E2E_FRONTEND_PORT=4176`으로 통합 검증을 추가 실행했다. 화면 갱신 일시정지·키보드·모바일·404와 보안 관측을 포함한 19개 항목이 통과했다. 세부 결과는 [UI 검수](phase7-ui-accessibility-review.md)와 [보안 감사](phase7-security-audit.md)에 기록한다. 보안 관측 성공은 발견된 접근 통제 취약점의 해소를 의미하지 않는다.
+
 ## 실제 확인한 동작
 
 - 시험 구간 CSV 16행의 모든 Tag·값·시각을 Kafka/API/WebSocket/브라우저까지 대조.
