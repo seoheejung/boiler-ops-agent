@@ -1,109 +1,257 @@
 # BoilerOps Agent
 
-한국중부발전의 공개 CSV를 실제 Kafka → FastAPI → WebSocket → React/R3F로 재생하는 보일러 모니터링 프로젝트.
+공개 보일러 운전 CSV를 **Kafka → FastAPI → WebSocket → React**로 재생하고, 선택한 센서의 이력·AI 근거·온도 예측을 확인하는 로컬 프로젝트입니다. Simulator는 사람의 승인 절차를 검증하는 `demo_bias` 상태 머신입니다. 실제 발전설비에 연결하지 않습니다.
 
-[그림으로 보는 프로젝트 지도와 실행 가이드](docs/index.html): `docs/index.html`을 브라우저에서 열면 코드 지도, 타입·호출 흐름, 구현 전 설계 절차, 확인 방법과 후속 과제를 볼 수 있다.
+[그림으로 보는 프로젝트 지도](docs/index.html)를 브라우저로 열면 기능별 흐름, 타입·호출 계약, 코드와 검수 결과를 **같은 페이지에서** 읽을 수 있습니다.
 
-## 현재 상태
+## 먼저 화면으로 보기
 
-**Phase 1~7 구현, Phase별 README 갱신·개별 커밋 및 로컬 통합 E2E 검증 완료.**
-실제 원본 CSV, Kafka, Chromium, Ollama 모델로 검증했다. 최종 결과는 [Phase 7 결과](docs/results/phase7-integrated-validation.md)에서 확인한다.
+실제 CSV·Kafka·Ollama를 사용한 로컬 E2E에서 촬영한 화면입니다. 개인 접근 키와 세션 쿠키는 화면에 포함하지 않습니다.
 
-| Phase | 상태 | 내용 |
-| --- | --- | --- |
-| 1 | 검증 완료 | 원본 재생, Kafka, WebSocket, 2.5D Scene, 연결/결측 상태 |
-| 2 | 검증 완료 | 전체 Tag Registry, 논리 매핑, 이력·관련 Tag |
-| 3 | 검증 완료 | 실제·목표·제어값 비교, 변화율, 분포 편차 |
-| 4 | 검증 완료 | 검증된 Read Tool과 수치 근거 Trace를 사용하는 로컬 AI Agent |
-| 5 | 검증 완료 | 5분 온도 예측, 시간순 평가, Agent 예측 조회 |
-| 6 | 검증 완료 | 명시적 인증·승인 후 로컬 Simulator 변경, SQLite Audit |
-| 7 | 검증 완료 | Kafka·WebGL·Agent 실패 복구, 승인 경합·변조·만료 차단 |
+![KPI, 보일러 계통도, 선택한 센서의 Inspector가 표시된 실제 운전 화면](docs/images/dashboard.jpg)
 
-## 실행
+| 로그인 | 제안 검토와 승인 결과 |
+| --- | --- |
+| ![개인 사용자 ID와 접근 키로 로그인하는 화면](docs/images/login.jpg) | ![로컬 Simulator 제안을 사람이 확인하고 실행한 결과](docs/images/simulator.jpg) |
 
-필수 도구: Python 3.13, uv, Node.js 22.12 이상, Docker Compose.
-원본 CSV를 `data/raw/`에 배치한다. 원본은 Git에 포함하지 않는다.
+## 1. 준비할 것
+
+아래 절차는 **Windows PowerShell**, 프로젝트 루트에서 실행합니다. 현재 프로젝트 경로는 다음과 같습니다.
 
 ```powershell
-if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+Set-Location 'D:\01_Programming\08_AI\Agent\boiler-ops-agent'
+```
+
+| 도구 | 용도 | 설치 확인 명령 |
+| --- | --- | --- |
+| Python 3.13, uv | API·CSV 재생·예측 | `uv --version` |
+| Node.js 22.12 이상 | React 화면·빌드 | `node --version` |
+| Docker Desktop + Compose | 실제 Kafka | `docker compose version` |
+| Ollama | 로컬 AI 모델 | `ollama --version` |
+
+**Docker Desktop을 먼저 실행**하고 엔진이 준비될 때까지 기다립니다.
+
+```powershell
+docker info --format '{{.ServerVersion}}'
+```
+
+숫자 버전이 나오면 준비된 것입니다. `dockerDesktopLinuxEngine` 연결 오류가 나오면 Docker Desktop의 실행 상태를 확인합니다.
+
+원본 CSV를 `data/raw/`에 넣습니다. 원본 데이터는 저장소에 포함되지 않습니다. 사용한 파일 이름은 다음과 같습니다.
+
+```text
+한국중부발전(주)_(AI 친화 데이터)분 단위 발전설비(보일러) 운전데이터_20250404.csv
+```
+
+## 2. 의존성과 기본 설정 준비 — 최초 한 번
+
+```powershell
 uv sync --frozen
 npm.cmd ci --prefix frontend
-docker compose up -d --wait kafka
-uv run python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+if (-not (Test-Path -LiteralPath '.env')) {
+    Copy-Item -LiteralPath '.env.example' -Destination '.env'
+}
+notepad .env
 ```
 
-Frontend 터미널:
+`.env`에서 다음 값을 확인합니다. 경로·파일 이름은 실제 CSV와 일치해야 합니다. 따옴표를 사용하면 공백이 있는 경로도 명확하게 표현할 수 있습니다.
+
+```dotenv
+BOILER_DATASET_PATH="data/raw/한국중부발전(주)_(AI 친화 데이터)분 단위 발전설비(보일러) 운전데이터_20250404.csv"
+REPLAY_INTERVAL_MS=1000
+KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:9092
+KAFKA_TOPIC=boiler.telemetry.raw
+CSV_ENCODING=utf-8-sig
+CSV_TIME_COLUMN=일자
+STALE_AFTER_MS=5000
+HISTORY_LIMIT=3600
+REPLAY_START_ROW=42841
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen2.5-coder:7b
+FORECAST_MODEL_PATH=artifacts/models/reheater.json
+AGENT_TRACE_DIR=artifacts/agent/traces
+SIMULATOR_DB_PATH=artifacts/simulator.sqlite
+```
+
+`42841`은 사용한 CSV의 예측 시험 구간 시작 행입니다. 관측만 처음부터 보고 싶다면 `REPLAY_START_ROW=1`로 바꿀 수 있습니다. 학습·검증 cutoff 이전 데이터에 대한 예측 요청은 거부됩니다. 원본 Tag 끝의 공백이나 결측값을 CSV에서 임의로 수정하지 마세요.
+
+## 3. 개인 로그인 키와 Kafka 자격 생성 — 최초 한 번
 
 ```powershell
-npm.cmd run dev --prefix frontend
+uv run python scripts/setup-security.py --origin http://127.0.0.1:5173
 ```
 
-Replay 터미널:
+다음 두 계정의 **사용자 ID와 개인 접근 키가 한 번만** 터미널에 표시됩니다. 개인 키를 별도로 안전하게 보관합니다.
+
+| 사용자 ID | 권한 | 가능한 작업 |
+| --- | --- | --- |
+| `operator` | 운영자 | 관측, Agent 조회, 본인 Trace·제안·승인·Audit |
+| `viewer` | 조회 | 공통 관측·이력·분석·예측 읽기 |
+
+생성된 `.env.security`에는 접근 키의 SHA-256 해시와 Kafka의 서로 다른 관리자·생산자·소비자 자격이 저장됩니다. 접근 키 원문은 저장하지 않습니다. 이 파일은 Git에서 제외됩니다. **기존 파일이 있으면 명령은 덮어쓰지 않고 중단합니다.** 매번 실행할 필요가 없습니다.
+
+접근 키를 잃었다면 새로운 키와 해시를 발급해 해당 계정의 `key_hash`를 교체하고 API를 재시작해야 합니다. 기존 파일을 삭제해 Kafka 자격까지 무작정 바꾸지 마세요. 예전 `SIMULATOR_APPROVAL_TOKEN`은 더 이상 사용하지 않습니다.
+
+브라우저는 반드시 `http://127.0.0.1:5173`으로 엽니다. `localhost`, 다른 포트, 다른 Origin은 동일한 주소로 취급하지 않습니다. 화면 주소를 바꿀 때는 `.env.security`의 `APP_PUBLIC_ORIGIN`도 함께 바꾸고 API를 재시작합니다.
+
+## 4. Kafka 시작과 Topic 권한 설정
 
 ```powershell
-uv run python -m backend.app.replay.producer
+docker compose --env-file .env --env-file .env.security up -d --wait kafka
+docker compose --env-file .env --env-file .env.security exec -T kafka bash /opt/boiler/admin.sh init-topic boiler.telemetry.raw
 ```
 
-Vite가 표시하는 로컬 URL에서 접속한다. `.env`의 `BOILER_DATASET_PATH`, `REPLAY_INTERVAL_MS`,
-`KAFKA_BOOTSTRAP_SERVERS`, `KAFKA_TOPIC`은 필수다. CSV UTF-8 BOM과 원본 Tag의 공백을 보존한다.
-재생 종료 시 STALE을 표시한다. 새 재생은 새 run_id에서 sequence 1로 시작한다.
-
-## 검증
+첫 명령은 Kafka를 시작하고 healthy 상태를 기다립니다. 두 번째는 **단일 partition Topic과 ACL**을 만듭니다. `.env`의 `KAFKA_TOPIC`을 바꿨다면 두 번째 명령의 마지막 이름도 바꿉니다. 두 명령 모두 재실행할 수 있습니다.
 
 ```powershell
-npm.cmd run build --prefix frontend
-cd frontend
-npx.cmd playwright install chromium
-cd ..
-$env:E2E_PHASE = 'phase7'
-node scripts/e2e.mjs
+docker compose --env-file .env --env-file .env.security ps
 ```
 
-E2E는 8000/4173 포트와 고유 Kafka Topic을 사용하고 종료 시 자신이 시작한 프로세스를 종료한다.
-4173을 다른 프로젝트가 사용 중이면 `$env:E2E_FRONTEND_PORT = '4176'`처럼 빈 화면 포트를 지정한다. 사용 중인 포트는 테스트 시작 전에 오류로 중단한다.
-Phase 7은 프로젝트 Kafka를 일시 중단·복구한다. 이 Compose Broker를 별도 운영 작업과 공유하지 않는다.
-실제 입력 해시, 선택 구간의 16행, WebSocket 이벤트, 결과 JSON, 화면 캡처를 `artifacts/e2e/phaseN/`에 남긴다.
-Phase 5~7은 학습 이후 시험 구간을 사용한다. `E2E_PHASE=phase1`부터 `phase7`까지 선택할 수 있다.
-최종 승인 검증: 무승인 변경 0건, 승인 우회 0건, 거절 후 실행 0건, 실행 Trace 기록률 100%.
-결과 문서는 `docs/results/`에서 확인한다. 단위 테스트는 만들지 않는다.
+Kafka가 `Up`·`healthy`이면 다음으로 진행합니다. 생산자는 이 Topic에 쓰기만, 소비자는 읽기만 할 수 있습니다. API나 재생 프로세스는 Topic을 자동 생성하지 않습니다.
 
-화면·접근성 결과: [Phase 7 UI 검수](docs/results/phase7-ui-accessibility-review.md). 문서 페이지의 브라우저 검수는 `node scripts/review-ui.mjs`로 별도 실행한다.
-적대적 환경 검토: [보안 감사와 미해결 과제](docs/results/phase7-security-audit.md). 기존 승인 검증 통과는 외부 배포의 안전성을 의미하지 않는다.
+Kafka 자격은 로컬 SASL 연결용이며 브로커 포트는 `127.0.0.1`에만 열립니다. 원격 브로커에는 인증서 검증이 있는 `SASL_SSL` 설정이 필요합니다. Compose의 현재 설정은 로컬 검증용입니다.
 
-## 로컬 AI Agent
+## 5. AI 모델과 예측 모델 준비
 
-Ollama에 `qwen2.5-coder:7b` 모델이 필요하다. `.env.example`의 `OLLAMA_BASE_URL`, `OLLAMA_MODEL`을 설정한다.
-`ollama list`로 모델을 확인하고, 없다면 `ollama pull qwen2.5-coder:7b`로 준비한다.
-외부 API 키는 필요하지 않다. 설비 또는 센서를 선택하고 Agent 조회를 실행한다.
-모델은 허용된 Read Tool과 근거 ID를 선택하며, 수치는 실제 도구 결과로부터 렌더링된다.
-Trace는 `artifacts/agent/traces/`에 저장한다. 모델 오류는 성공 응답으로 대체하지 않는다.
+Ollama 앱을 실행합니다. 앱 없이 서비스만 시작하려면 **별도 터미널**에서 다음 명령을 실행한 채 둡니다. 이미 Ollama가 실행 중이면 중복 실행하지 않습니다.
 
-## 예측 모델
+```powershell
+ollama serve
+```
+
+다른 터미널에서 모델을 확인합니다.
+
+```powershell
+ollama list
+```
+
+목록에 `qwen2.5-coder:7b`가 없을 때만 다운로드합니다. 최초 다운로드와 첫 추론에는 시간이 걸릴 수 있습니다.
+
+```powershell
+ollama pull qwen2.5-coder:7b
+```
+
+프로젝트 루트에서 온도 예측 모델을 학습합니다.
 
 ```powershell
 uv run python -m backend.app.forecast.train
 ```
 
-시간순 학습/검증/시험 분리와 모델 보고서를 `FORECAST_MODEL_PATH`에 저장한다.
-모델 추론을 보려면 `REPLAY_START_ROW=42841`로 시험 구간을 재생한다. 모델 cutoff 이전 추론은 거부한다.
-검증 MAE로 선택된 선형 모델은 시험 MAE 0.105784로 Naive 0.033211보다 나빴다.
-현재 예측은 실험·평가용이며 단위와 제어 효과는 미확인이다. 자세한 결과는 `docs/results/phase5-temperature-forecast.md` 참고.
+`artifacts/models/reheater.json`이 생기고 평가 JSON이 출력되면 완료입니다. 다른 CSV를 사용했다면 보고서의 `test_start_row`에 맞춰 `.env`의 `REPLAY_START_ROW`를 조정합니다. 학습은 데이터가 바뀌지 않으면 매번 할 필요가 없습니다.
 
-## 승인 기반 Simulator
+## 6. 터미널 세 개로 실행
 
-Simulator는 승인 절차를 확인하는 `demo_bias` 상태 머신이며 물리 발전설비 모델이 아니다.
-재열기 Agent 조회 후 별도 Control Panel에서 데모 변경을 제안하고, 값을 검토한 뒤 승인 또는 거절한다.
-`SIMULATOR_APPROVAL_TOKEN`에 최소 32자의 임의 운영자 자격을 설정해야 승인이 활성화된다.
-실제 자격 값은 Git·로그·결과 문서에 넣지 않는다. E2E는 임시 자격을 메모리에서 생성한다.
-상태·제안·승인·실행 Audit는 `SIMULATOR_DB_PATH`에 보존한다.
-제안은 5분 동안 유효하며 revision이 달라지거나 이미 결정된 제안은 실행하지 않는다.
+모든 터미널의 작업 폴더가 프로젝트 루트인지 확인합니다. 아래 세 프로세스는 화면을 보는 동안 실행한 채 둡니다.
 
-## 데이터의 한계
+### 터미널 A — API
 
-- 50,400행: 2025-03-01 00:00 ~ 2025-04-04 23:59.
-- `목표 재열기 온도`는 전체 결측. 숫자로 대체하지 않는다.
-- 측정 단위, 실제 센서 좌표, 산업 안전 임계값은 미확인.
-- 3D Scene은 논리적 계통 탐색용이며 실제 P&ID 또는 Digital Twin이 아니다.
-- 현재 실행 환경은 로컬 개발·검증용이다. 다중 사용자 인증·프로덕션 배포는 미검증이며 실제 발전설비 제어 연결은 프로젝트 범위 밖이다.
+```powershell
+Set-Location 'D:\01_Programming\08_AI\Agent\boiler-ops-agent'
+uv run python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --ws-max-size 1024 --ws-max-queue 8 --limit-concurrency 64 --timeout-keep-alive 5
+```
 
-기획: [.project/plan.md](.project/plan.md) · UI: [DESIGN.md](DESIGN.md) · 작업 규칙: [AGENTS.md](AGENTS.md).
+`Application startup complete`가 나오면 준비되었습니다. 필수 인증 설정이 누락되면 시작하지 않습니다. 인증 키나 환경 파일 내용을 로그에 붙여넣지 마세요.
+
+### 터미널 B — 화면
+
+```powershell
+Set-Location 'D:\01_Programming\08_AI\Agent\boiler-ops-agent'
+npm.cmd run dev --prefix frontend -- --port 5173 --strictPort
+```
+
+브라우저에서 **http://127.0.0.1:5173**을 열고 3단계의 `operator` 계정으로 로그인합니다. 이 시점에는 아직 재생 전이므로 값이 없거나 STALE일 수 있습니다.
+
+### 터미널 C — CSV 재생
+
+```powershell
+Set-Location 'D:\01_Programming\08_AI\Agent\boiler-ops-agent'
+uv run python -m backend.app.replay.producer
+```
+
+`sequence`가 증가하는 JSON 줄이 출력됩니다. 브라우저에서 Kafka·WebSocket이 `CONNECTED`, 관측 상태가 `LIVE`인지 확인합니다. Source Time은 현재 시각이 아니라 **CSV의 과거 시각**입니다.
+
+짧게 관측만 시험하려면 `--limit 16`을 붙일 수 있습니다. 16행이 끝나면 STALE이 됩니다. Agent·승인까지 확인할 때는 모델이 근거를 만드는 동안 재생이 계속되도록 기본 명령을 사용하세요.
+
+## 7. 화면에서 차례로 확인
+
+1. **관측**: 상단 KPI 값과 Sequence가 변하는지 확인합니다. `화면 자동 갱신 일시정지`로 읽는 값을 멈추고, `재개`로 따라잡을 수 있습니다.
+2. **센서 탐색**: 설비 버튼이나 센서 목록을 선택합니다. Inspector의 원본 Tag·현재값·Source Time을 확인하고 이력 표와 비교합니다.
+3. **예측**: 시험 구간에서 재열기 5분 예측을 확인합니다. 목표 온도는 원본 전체가 결측이므로 임의의 목표나 제어 권고를 표시하지 않습니다.
+4. **AI 조회**: 재열기의 `최종재열기 입구 온도 평균값` 센서를 선택하고 `Agent 조회`를 누릅니다. 처리 중 안내가 끝나면 숫자의 근거 ID와 Trace를 확인합니다. 모델 응답에 따라 수십 초 이상 걸릴 수 있습니다.
+5. **제안**: 재열기 조회가 성공한 뒤 `Agent Simulator 제안 생성`을 누릅니다. 로컬 데모 변경 의도를 입력할 수 있습니다. 이때 Simulator 값은 아직 바뀌지 않아야 합니다.
+6. **승인**: 기존값·요청값·Revision·만료 시각을 확인하고 확인 체크박스를 선택합니다. `승인 및 Simulator 실행`을 누르면 실행 결과, 새 값, Audit가 표시됩니다. `거절`하면 값은 유지됩니다.
+7. **다음 제안**: 같은 Trace는 한 번만 사용합니다. 새 제안 전에는 `Agent 조회`를 다시 실행합니다. 오래된 근거, 다른 재생 세션의 근거, 다른 사용자 기록은 거부됩니다.
+8. **로그아웃**: 상단의 계정·로그아웃 버튼을 누릅니다. 세션은 기본 30분이며 API 재시작 시 다시 로그인해야 합니다.
+
+Trace·Audit 링크는 인증된 JSON 확인용입니다. 설명·평가·소스 코드는 [프로젝트 지도](docs/index.html)의 상세 보기에서 서식이 있는 문서로 읽을 수 있습니다.
+
+## 8. 종료와 다음 실행
+
+재생 → 화면 → API 순서로 각 터미널에서 `Ctrl+C`를 누릅니다. 이 프로젝트의 Kafka도 종료하려면 다음 명령을 사용합니다.
+
+```powershell
+docker compose --env-file .env --env-file .env.security stop kafka
+```
+
+다음 실행은 **4단계 Kafka 시작 → 5단계 Ollama 실행 확인 → 6단계 세 터미널**만 진행하면 됩니다. 개인 키 생성, 의존성 설치, 모델 다운로드·학습을 매번 반복하지 않습니다.
+
+`stop`은 컨테이너를 보존합니다. `down`이나 컨테이너 교체는 현재 구성에서 Kafka 재생 데이터를 잃을 수 있습니다. API의 Simulator DB·Trace·예측 모델은 로컬 `artifacts/` 경로에 남습니다. Kafka의 오래된 재생 시작 이벤트가 보관 기간을 지나 사라졌다면 CSV 생산자를 다시 시작해 새로운 run을 만듭니다.
+
+## 9. 막힐 때 확인할 곳
+
+| 증상 | 확인·해결 |
+| --- | --- |
+| Python/Node 명령을 찾지 못함 | 도구 설치 후 새 터미널을 열고 1단계 버전 확인 |
+| CSV 파일 없음 | `.env`의 경로, 현재 폴더, 파일 이름 확인 |
+| `.env.security already exists` | 이미 발급된 키 사용. 재실행 시 생성 단계 생략 |
+| 로그인 HTTP 403 | 주소가 `APP_PUBLIC_ORIGIN`과 정확히 일치하는지 확인 |
+| 로그인 HTTP 401 | 사용자 ID와 개인 접근 키 확인. API 재시작 후 다시 로그인 |
+| 로그인·모델 HTTP 429 | 요청·세션·모델 한도. 중복 요청을 멈추고 잠시 후 재시도 |
+| 포트가 이미 사용 중 | 기존 본인 서버 상태 확인. 임의로 다른 프로젝트를 종료하지 않기 |
+| Kafka DISCONNECTED | Docker healthy, SASL 자격, 4단계 Topic·ACL 설정 확인 |
+| Sequence가 안 오름 | 재생 터미널 오류, CSV 설정, Kafka 권한 확인 |
+| 관측 STALE | 재생이 끝났거나 중단됨. API가 있어도 새 데이터가 없으면 STALE |
+| 예측 모델 없음 / cutoff 오류 | 5단계 학습 및 `REPLAY_START_ROW` 확인 |
+| Agent HTTP 503 | Ollama 실행, 모델 설치, 실패 Trace의 도구 오류 확인 |
+| 제안·승인 HTTP 409 | LIVE 상태에서 같은 재생 세션의 새 재열기 Agent 근거로 다시 제안 |
+| HTTP 507 | Trace·제안·Audit 보관 한도 도달. 서비스 중지 후 백업·보관 정책에 따라 처리. Audit 자동 삭제 안 함 |
+| `tsc`를 찾지 못함 | 루트에서 `npm.cmd ci --prefix frontend` 실행 |
+
+세션·요청·모델 한도는 **단일 API 프로세스 기준**입니다. 여러 worker를 실행하지 않습니다. 외부 배포 전에는 공유 세션·한도 저장소, TLS 프록시, 계정 운영·비밀 교체·보관 정책을 별도로 설계해야 합니다.
+
+## 10. 변경을 다시 검증하기
+
+Docker Desktop과 Ollama를 준비합니다. E2E는 설치된 모델을 사용하며 자동 다운로드하지 않습니다. 한 번만 브라우저를 설치합니다.
+
+```powershell
+npm.cmd run build --prefix frontend
+Set-Location frontend
+npx.cmd playwright install chromium
+Set-Location ..
+$env:E2E_PHASE = 'phase7'
+$env:E2E_FRONTEND_PORT = '4176'
+node scripts/e2e.mjs
+```
+
+8000·4176·19092 포트가 비어 있어야 합니다. E2E는 별도 Compose 프로젝트 `boiler-ops-security-e2e`와 임시 자격을 만들고 실제 CSV·Kafka·Ollama·Chromium·SQLite를 검사합니다. Kafka 중단·복구는 이 테스트용 컨테이너에만 적용합니다. 종료 시 시작한 프로세스와 테스트 컨테이너를 정리합니다.
+
+입력 해시, 원본 대조, WebSocket 기록, 실패 경로, 승인 Audit, 차단 결과와 화면 캡처는 `artifacts/e2e/phase7/`에 남습니다. 실행 요약은 `run.json`, 보안 경계 검증은 `security-review/boundaries.json`을 확인합니다. 저장소에는 필요한 화면 세 장만 압축 JPEG로 포함합니다.
+
+```powershell
+uv run python scripts/build-guide.py
+node scripts/review-ui.mjs
+```
+
+문서 코드·결과를 수정했다면 첫 명령으로 브라우저 내 상세 보기 데이터를 갱신하고 두 번째로 문서 메뉴·링크·모바일·키보드를 확인합니다. 실제 NVDA·VoiceOver 낭독 검수는 별도 작업입니다.
+
+## 현재 구현과 한계
+
+Phase 1~7: 실시간 관측, 원본 Tag Registry, 이력·분석, Read Tool Agent, 5분 온도 예측, 승인 Simulator, 실패 복구를 구현했습니다. **최신 검증: 통합 E2E 19개 항목·보안 경계 50개 관측 통과.** 이번 보안 보완의 실제 검증 상태는 [보안 보완 결과](docs/results/phase7-security-hardening.md)에 기록합니다. 최초 감사의 발견 사항과 당시 증거는 [원본 감사](docs/results/phase7-security-audit.md)에 보존합니다.
+
+- 50,400행: 2025-03-01 00:00 ~ 2025-04-04 23:59의 과거 공개 데이터입니다.
+- 목표 재열기 온도, 측정 단위, 실제 센서 좌표, 산업 안전 임계값은 미확인입니다.
+- 검증 MAE로 선택된 선형 모델의 시험 MAE는 0.105784이며 Naive 0.033211보다 나빴습니다. 예측은 실험·평가용입니다.
+- 2.5D Scene은 논리적 탐색 지도이며 실제 도면이나 Digital Twin이 아닙니다.
+- 기존 소유자 없는 Trace·제안·Audit는 사용자에게 공개하지 않습니다. 임의로 새 계정에 귀속하지 않습니다.
+
+기획: [.project/plan.md](.project/plan.md) · UI: [DESIGN.md](DESIGN.md) · 검수 기록: [접근성](docs/results/phase7-ui-accessibility-review.md).

@@ -9,12 +9,12 @@
 | 요청 | 처리 |
 | --- | --- |
 | 가로 스크롤·모바일 overflow | 최소 너비 제거, 반응형 KPI·패널·feed, 표의 좁은 화면 표시와 긴 문자열 줄바꿈 |
-| 깨진 링크·푸터 | 문서의 실제 상대 파일/anchor 검사, 앱에는 존재하는 section 링크만 제공 |
+| 깨진 링크·푸터 | 문서의 내부 anchor와 상세 보기 allowlist 검사, 앱에는 존재하는 section 링크만 제공 |
 | 모바일 메뉴·불필요한 navigation | 실제 패널만 연결, 메뉴 열림 상태·Escape 복귀·선택 후 대상 포커스 |
 | favicon·페이지 제목·메타 설명 | 앱·문서·404 제목/설명과 작은 SVG favicon |
 | 맞춤 404 | 앱의 미등록 경로 복귀 화면, 정적 docs/404.html |
 | 저작권 연도·로고 | 현재 연도 표시, 홈 링크에 명확한 접근 가능한 이름 |
-| 이미지 압축 | 앱/문서의 bitmap 자산 없음. 새 그림은 SVG/CSS, E2E PNG는 검증용 생성물 |
+| 이미지 압축 | 구조 그림은 HTML/CSS. 실제 화면 3장을 압축 JPEG로 제공하고 각 이미지에 대체 설명 추가 |
 | 버튼·성공·오류 | 비어 있는 제안과 비활성 승인 차단, Agent·Simulator 상태 안내, 실패한 registry를 무한 로딩으로 표시하지 않음 |
 | placeholder | 검색은 실제 label로 안내. 질문/요청의 기본 문장은 동작 가능한 실제 입력값으로 유지 |
 | 키보드 | 본문 건너뛰기, 전체 focus-visible, 설비 버튼, native details/select, 메뉴 복귀 |
@@ -34,7 +34,7 @@ node scripts/e2e.mjs
 node scripts/review-ui.mjs
 ```
 
-첫 E2E에는 실제 Kafka·CSV·Ollama·SQLite 경계를 사용하며 앱의 키보드/모바일 검수를 포함한다. 마지막 명령은 테스트가 시작·종료하는 loopback 서버에서 문서·문서 404만 제공하여 Chromium으로 검수한다. 저장소 전체를 정적 웹 루트로 공개하지 않는다. Chromium의 file URL 접근 오류 후 이 방식을 사용했다.
+첫 E2E에는 실제 Kafka·CSV·Ollama·SQLite 경계를 사용하며 앱의 키보드/모바일 검수를 포함한다. 마지막 명령은 테스트가 시작·종료하는 loopback 서버에서 문서·문서 404·공개 미리보기·화면 이미지만 제공하여 Chromium으로 검수한다. 저장소 전체를 정적 웹 루트로 공개하지 않는다. Chromium의 file URL 접근 오류 후 이 방식을 사용했다.
 
 아티팩트: `artifacts/e2e/phase7/ui-review/`의 JSON 관측, 접근성 YAML, desktop/mobile PNG. 결과 판정은 `app-result.json`과 `docs-result.json`, 전체 기능은 상위 `run.json`에서 확인한다.
 
@@ -45,7 +45,13 @@ node scripts/review-ui.mjs
 - 실제 앱: 320/375/768/1280px, 가로 overflow 없음. 320px에서 글자/단어 간격·행간을 늘린 검사 통과. main 건너뛰기, 설비 선택, 모바일 메뉴 열기/Escape 복귀/section 이동, 분석 select를 키보드로 확인.
 - 표의 row/columnheader/cell과 SVG 이름·설명은 Chromium 접근성 트리에 노출됨. 양식 control의 이름 누락 없음.
 - 실제 WebSocket 수신 중 표시 일시정지와 재개 시 최신값 복원, Agent·승인·거절·실패 경로 통과.
-- 전체 Phase 7 E2E는 19개 항목 통과. 보안 관측 항목의 성공은 검사가 실행되었다는 뜻이며 발견된 취약점 해소를 뜻하지 않음.
+- 최초 Phase 7 E2E는 19개 항목을 통과했다. 이후 개인 세션·문서 개편과 보안 차단의 통합 결과는 `phase7-security-hardening.md`에 별도로 기록한다.
+
+## 문서 탐색 추가 검증
+
+- README는 실행 순서, 감사·예측 결과는 제목·표·코드 블록으로 표시한다. 원본 Markdown 이동이나 소스 파일 다운로드가 없다.
+- native dialog의 코드 미리보기와 Escape 닫기, 메뉴 키보드 조작, 320px 상세 문서의 가로 overflow를 검증한다.
+- 실제 화면 캡처 3장에 alt 제공. 원본 코드는 allowlist로 읽고 HTML escape 후 문서에 포함한다.
 
 ## 사람이 추가 확인할 순서
 

@@ -127,6 +127,7 @@ async function reviewDocumentation() {
   mkdirSync(output, { recursive: true });
   const publicFiles = new Map([
     ['/docs/index.html', ['docs/index.html', 'text/html; charset=utf-8']],
+    ...['dashboard', 'login', 'simulator'].map(name => [`/docs/images/${name}.jpg`, [`docs/images/${name}.jpg`, 'image/jpeg']]),
     ['/docs/404.html', ['docs/404.html', 'text/html; charset=utf-8']],
     ['/frontend/public/favicon.svg', ['frontend/public/favicon.svg', 'image/svg+xml']],
   ]);
@@ -159,6 +160,24 @@ async function reviewDocumentation() {
       results.checks.push(`${name}: links, labels, landmarks, graphics and reflow`);
     }
     await page.goto(base + 'index.html');
+    const downloads = []; page.on('download', item => downloads.push(item.suggestedFilename()));
+    await page.getByRole('button', { name: '처음부터 실행하는 순서' }).click();
+    await page.getByRole('dialog').getByRole('heading', { name: '6. 터미널 세 개로 실행', exact: true }).waitFor();
+    await inspect(page, 'docs-readme-dialog-320', output);
+    assert.equal(await page.getByRole('dialog').evaluate(element => element.scrollWidth > element.clientWidth + 1), false);
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: '최초 감사 기록', exact: true }).click();
+    assert.ok(await page.getByRole('dialog').locator('table').count() > 0);
+    await inspect(page, 'docs-audit-dialog-320', output);
+    assert.equal(await page.getByRole('dialog').evaluate(element => element.scrollWidth > element.clientWidth + 1), false);
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'AI 근거 조회', exact: false }).click();
+    await page.getByRole('button', { name: 'query_agent', exact: false }).click();
+    assert.ok((await page.getByRole('dialog').locator('pre').textContent()).includes('def query_agent('));
+    await page.keyboard.press('Escape');
+    assert.deepEqual(downloads, []);
+    results.checks.push('Rendered README and audit tables; source preview; Escape closes dialogs; no downloads');
+    await page.reload();
     await page.keyboard.press('Tab');
     await page.keyboard.press('Enter');
     assert.equal(await page.locator('#main').evaluate(element => element === document.activeElement), true);
