@@ -162,7 +162,7 @@ async function reviewDocumentation() {
     await page.goto(base + 'index.html');
     const downloads = []; page.on('download', item => downloads.push(item.suggestedFilename()));
     await page.getByRole('button', { name: '처음부터 실행하는 순서' }).click();
-    await page.getByRole('dialog').getByRole('heading', { name: '6. 터미널 세 개로 실행', exact: true }).waitFor();
+    await page.getByRole('dialog').getByRole('heading', { name: '6. 개발 모드로 실행', exact: true }).waitFor();
     await inspect(page, 'docs-readme-dialog-320', output);
     assert.equal(await page.getByRole('dialog').evaluate(element => element.scrollWidth > element.clientWidth + 1), false);
     await page.keyboard.press('Escape');
