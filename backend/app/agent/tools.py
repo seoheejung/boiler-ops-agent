@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from backend.app.domain.analysis import sensor_summary
+from backend.app.domain.analysis import LOOPS, sensor_summary
 from backend.app.forecast.service import forecast
 
 TOOL_NAMES = ("get_boiler_status", "get_equipment_status", "get_sensor_history", "get_operating_targets", "get_current_controls", "get_deviation_summary", "get_temperature_forecast")
@@ -31,11 +31,22 @@ class ReadTools:
                 raise ValueError("Forecast only supports the selected reheater equipment")
             return forecast(self.state)
         if name == "get_sensor_history":
-            return {"equipment": self.equipment, "tag": self.tag, "points": [
+            return {"equipment": self.equipment, "tag": self.tag, "source_time": self.state.current['source_time'], "points": [
                 {"source_time": event["source_time"], **event["sensors"][self.tag]} for event in self.state.history[-30:]]}
         if name == "get_deviation_summary":
             return sensor_summary(self.state, self.tag)
         role = {"get_operating_targets": "target", "get_current_controls": "control"}.get(name)
-        return {"equipment": self.equipment, "source_time": self.state.current["source_time"],
+        result = {"equipment": self.equipment, "source_time": self.state.current["source_time"],
                 "sensors": {tag: self.state.current["sensors"][tag] for tag in self.tags
                             if role is None or self.state.registry[tag]["measurement_type"] == role}}
+        if name == 'get_operating_targets':
+            loop = next((item for item in LOOPS.values() if item['actual'] == self.tag), None)
+            result['comparison'] = None if loop is None else {
+                'actual_tag': self.tag, 'target_tag': loop['target'],
+                'actual_value': self.state.current['sensors'][self.tag]['value'],
+                'actual_quality': self.state.current['sensors'][self.tag]['quality'],
+                'target_value': self.state.current['sensors'].get(loop['target'], {}).get('value'),
+                'target_quality': self.state.current['sensors'].get(loop['target'], {}).get('quality')}
+        if name == 'get_current_controls':
+            result['control_policy'] = {'causality': 'unverified', 'allowed_range': None}
+        return result

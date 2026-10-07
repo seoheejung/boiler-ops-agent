@@ -177,7 +177,7 @@ uv run python -m backend.app.replay.producer
 1. **관측**: 상단 KPI 값과 Sequence가 변하는지 확인합니다. `화면 자동 갱신 일시정지`로 읽는 값을 멈추고, `재개`로 따라잡을 수 있습니다.
 2. **센서 탐색**: 설비 버튼이나 센서 목록을 선택합니다. Inspector의 원본 Tag·현재값·Source Time을 확인하고 이력 표와 비교합니다.
 3. **예측**: 시험 구간에서 재열기 5분 예측을 확인합니다. 목표 온도는 원본 전체가 결측이므로 임의의 목표나 제어 권고를 표시하지 않습니다.
-4. **AI 조회**: 재열기의 `최종재열기 입구 온도 평균값` 센서를 선택하고 `Agent 조회`를 누릅니다. 처리 중 안내가 끝나면 숫자의 근거 ID와 Trace를 확인합니다. 모델 응답에 따라 수십 초 이상 걸릴 수 있습니다.
+4. **AI 조회**: 재열기의 `최종재열기 입구 온도 평균값` 센서를 선택하고 `Agent 조회`를 누릅니다. 답변은 결론 → 근거와 원본 시각 → 한계 순서로 표시됩니다. [다섯 질문의 실제 답변과 검수 기록](docs/results/phase7-agent-answers.md)을 참고해 현재값·추이·목표 차이·예측 신뢰도·밸브 조작 가능 여부를 확인하세요. 모델 응답에 따라 수십 초 이상 걸릴 수 있습니다.
 5. **제안**: 재열기 조회가 성공한 뒤 `Agent Simulator 제안 생성`을 누릅니다. 로컬 데모 변경 의도를 입력할 수 있습니다. 이때 Simulator 값은 아직 바뀌지 않아야 합니다.
 6. **승인**: 기존값·요청값·Revision·만료 시각을 확인하고 확인 체크박스를 선택합니다. `승인 및 Simulator 실행`을 누르면 실행 결과, 새 값, Audit가 표시됩니다. `거절`하면 값은 유지됩니다.
 7. **다음 제안**: 같은 Trace는 한 번만 사용합니다. 새 제안 전에는 `Agent 조회`를 다시 실행합니다. 오래된 근거, 다른 재생 세션의 근거, 다른 사용자 기록은 거부됩니다.
@@ -235,7 +235,17 @@ node scripts/e2e.mjs
 
 8000·4176·19092 포트가 비어 있어야 합니다. E2E는 별도 Compose 프로젝트 `boiler-ops-security-e2e`와 임시 자격을 만들고 실제 CSV·Kafka·Ollama·Chromium·SQLite를 검사합니다. Kafka 중단·복구는 이 테스트용 컨테이너에만 적용합니다. 종료 시 시작한 프로세스와 테스트 컨테이너를 정리합니다.
 
-입력 해시, 원본 대조, WebSocket 기록, 실패 경로, 승인 Audit, 차단 결과와 화면 캡처는 `artifacts/e2e/phase7/`에 남습니다. 실행 요약은 `run.json`, 보안 경계 검증은 `security-review/boundaries.json`을 확인합니다. 저장소에는 필요한 화면 세 장만 압축 JPEG로 포함합니다.
+입력 해시, 원본 대조, WebSocket 기록, 실패 경로, 승인 Audit, 차단 결과와 화면 캡처는 `artifacts/e2e/phase7/`에 남습니다. 실행 요약은 `run.json`, 보안 경계 검증은 `security-review/boundaries.json`을 확인합니다. 저장소에는 문서에 필요한 화면을 압축 JPEG로 포함합니다.
+
+질문별 답변만 검수하려면 같은 준비 상태에서 다음 명령을 실행합니다. 위 통합 E2E와 동시에 실행하지 않습니다.
+
+```powershell
+$env:E2E_AGENT_REVIEW = 'improved'
+node scripts/e2e.mjs
+Remove-Item Env:E2E_AGENT_REVIEW
+```
+
+`artifacts/e2e/phase7/agent-review/improved/questions.json`에 질문별 도구·근거·답변·처리 시간과 결측·이력 부족 등 경계 상황을 저장합니다. 데스크톱·모바일 답변 캡처도 같은 폴더에 남습니다. 변경 전 `baseline/questions.json`이 있으면 비교하고, 없으면 현재 답변을 독립 검증합니다. 현재 코드에서 `baseline` 모드를 실행하면 현재 코드의 관측 기록이므로 과거 결과를 재현한 것으로 취급하지 않습니다.
 
 ```powershell
 uv run python scripts/build-guide.py
@@ -246,7 +256,7 @@ node scripts/review-ui.mjs
 
 ## 현재 구현과 한계
 
-Phase 1~7: 실시간 관측, 원본 Tag Registry, 이력·분석, Read Tool Agent, 5분 온도 예측, 승인 Simulator, 실패 복구를 구현했습니다. **최신 검증: 통합 E2E 19개 항목·보안 경계 50개 관측 통과.** 이번 보안 보완의 실제 검증 상태는 [보안 보완 결과](docs/results/phase7-security-hardening.md)에 기록합니다. 최초 감사의 발견 사항과 당시 증거는 [원본 감사](docs/results/phase7-security-audit.md)에 보존합니다.
+Phase 1~7: 실시간 관측, 원본 Tag Registry, 이력·분석, Read Tool Agent, 5분 온도 예측, 승인 Simulator, 실패 복구를 구현했습니다. **최신 검증: 질문 5개·경계 상황 6개, 통합 E2E 19개 항목·보안 경계 51개 관측 통과.** 답변 변경 전후와 재검증은 [질문별 검수 결과](docs/results/phase7-agent-answers.md), 기존 접근 통제의 구현 근거는 [보안 보완 결과](docs/results/phase7-security-hardening.md)를 참고하세요. 최초 감사의 발견 사항과 당시 증거는 [원본 감사](docs/results/phase7-security-audit.md)에 보존합니다.
 
 - 50,400행: 2025-03-01 00:00 ~ 2025-04-04 23:59의 과거 공개 데이터입니다.
 - 목표 재열기 온도, 측정 단위, 실제 센서 좌표, 산업 안전 임계값은 미확인입니다.

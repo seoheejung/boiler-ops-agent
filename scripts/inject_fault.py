@@ -27,6 +27,8 @@ async def telemetry_fault(mode):
     if mode == 'quality':
         event['measurements']['실제 출력값'] = ''
         event['measurements']['최종과열기 출구 온도 평균값'] = 'not-a-number'
+    elif mode == 'target-quality':
+        event['measurements']['목표 재열기 온도'] = 'not-a-number'
     elif mode == 'duplicate':
         event['sequence'] = state['sequence']
     elif mode == 'reverse':
@@ -44,7 +46,7 @@ async def telemetry_fault(mode):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('mode', choices=['quality', 'duplicate', 'reverse', 'tag', 'valid', 'bad-csv', 'expire', 'corrupt-proposal'])
+    parser.add_argument('mode', choices=['quality', 'target-quality', 'duplicate', 'reverse', 'tag', 'valid', 'bad-csv', 'expire', 'corrupt-proposal'])
     parser.add_argument('--path')
     parser.add_argument('--id')
     args = parser.parse_args()

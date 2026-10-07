@@ -127,7 +127,7 @@ async function reviewDocumentation() {
   mkdirSync(output, { recursive: true });
   const publicFiles = new Map([
     ['/docs/index.html', ['docs/index.html', 'text/html; charset=utf-8']],
-    ...['dashboard', 'login', 'simulator'].map(name => [`/docs/images/${name}.jpg`, [`docs/images/${name}.jpg`, 'image/jpeg']]),
+    ...['dashboard', 'login', 'simulator', 'agent-answer'].map(name => [`/docs/images/${name}.jpg`, [`docs/images/${name}.jpg`, 'image/jpeg']]),
     ['/docs/404.html', ['docs/404.html', 'text/html; charset=utf-8']],
     ['/frontend/public/favicon.svg', ['frontend/public/favicon.svg', 'image/svg+xml']],
   ]);
@@ -175,6 +175,17 @@ async function reviewDocumentation() {
     await page.getByRole('button', { name: 'query_agent', exact: false }).click();
     assert.ok((await page.getByRole('dialog').locator('pre').textContent()).includes('def query_agent('));
     await page.keyboard.press('Escape');
+    const answerReview = page.getByRole('button', { name: '다섯 질문의 실제 답변과 검수 기록', exact: false });
+    await answerReview.click();
+    const answerTable = await page.getByRole('dialog').locator('table').first().innerText();
+    assert.ok(answerTable.includes('66.52') && answerTable.includes('계산 불가') && answerTable.includes('Naive'));
+    await page.getByRole('dialog').getByRole('img').evaluate(image => image.decode());
+    await inspect(page, 'docs-agent-review-320', output);
+    assert.equal(await page.getByRole('dialog').evaluate(element => element.scrollWidth > element.clientWidth + 1), false);
+    await page.screenshot({ path: resolve(output, 'docs-agent-review-320.png'), fullPage: true });
+    await page.keyboard.press('Escape');
+    assert.equal(await answerReview.evaluate(element => element === document.activeElement), true);
+    results.checks.push('Five-question Agent report opens in-page; mobile reader fits; focus returns to report button');
     assert.deepEqual(downloads, []);
     results.checks.push('Rendered README and audit tables; source preview; Escape closes dialogs; no downloads');
     await page.reload();

@@ -103,9 +103,19 @@ export async function reviewSecurity({ context, page, out, env, root, python, ap
   const currentCookie = (await context.cookies()).find(cookie => cookie.name === 'boiler_session');
   checked('HttpOnly session cookie', currentCookie.httpOnly, true);
   checked('SameSite Strict session cookie', currentCookie.sameSite, 'Strict');
+  const sessionTiming = { observed_at: Date.now() / 1000, expires_at: currentCookie.expires, samples: [] };
+  const saveTiming = () => writeFileSync(resolve(resultDir, 'session-timing.json'), JSON.stringify(sessionTiming, null, 2));
+  saveTiming();
+  checked('configured 60-second session lifetime', currentCookie.expires - sessionTiming.observed_at > 45 && currentCookie.expires - sessionTiming.observed_at <= 61, true);
   await page.evaluate(() => { window.expiryClose = null; const ws = new WebSocket(`ws://${location.host}/api/ws`); ws.onclose = event => { window.expiryClose = event.code; }; window.expirySocket = ws; });
   await poll(() => page.evaluate(() => window.expirySocket.readyState === WebSocket.OPEN), 'expiry probe open');
-  await poll(async () => { await new Promise(resolve => setTimeout(resolve, 1000)); return (await apiFetch(base + '/api/state')).status === 401; }, 'absolute session expiry', 65000);
+  await poll(async () => {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    const response = await apiFetch(base + '/api/state');
+    sessionTiming.samples.push({ observed_at: Date.now() / 1000, server_date: response.headers.get('date'), status: response.status });
+    saveTiming();
+    return response.status === 401;
+  }, 'absolute session expiry', 65000);
   checked('expired session', (await apiFetch(base + '/api/state')).status, 401);
   await poll(() => page.evaluate(() => window.expiryClose === 1008), 'expiry closes active websocket');
   checked('expiry websocket close', await page.evaluate(() => window.expiryClose), 1008);

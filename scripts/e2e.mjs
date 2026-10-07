@@ -9,6 +9,7 @@ import { chromium } from '../frontend/node_modules/playwright/index.mjs';
 import { validateFailures } from './phase7.mjs';
 import { reviewApplication } from './review-ui.mjs';
 import { reviewSecurity } from './security-review.mjs';
+import { reviewAgentQuestions } from './review-agent.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const phase = process.env.E2E_PHASE ?? 'phase7';
@@ -16,7 +17,10 @@ const frontendPort = Number(process.env.E2E_FRONTEND_PORT ?? '4176');
 assert.ok(Number.isInteger(frontendPort) && frontendPort > 1023 && frontendPort <= 65535 && frontendPort !== 8000, 'Invalid E2E_FRONTEND_PORT');
 const frontendUrl = `http://127.0.0.1:${frontendPort}`;
 const securityOnly = process.env.E2E_SECURITY_ONLY === '1';
-const out = resolve(root, 'artifacts/e2e', phase, ...(securityOnly ? ['security-check'] : []));
+const agentReview = process.env.E2E_AGENT_REVIEW;
+assert.ok(!agentReview || ['baseline', 'improved'].includes(agentReview), 'Invalid E2E_AGENT_REVIEW');
+assert.ok(!(agentReview && securityOnly), 'Choose a single E2E mode');
+const out = resolve(root, 'artifacts/e2e', phase, ...(agentReview ? ['agent-review', agentReview] : securityOnly ? ['security-check'] : []));
 mkdirSync(out, { recursive: true });
 const dataset = process.env.BOILER_DATASET_PATH ?? resolve(root, 'data/raw', readdirSync(resolve(root, 'data/raw')).find(file => file.endsWith('.csv')));
 const env = { ...process.env, PYTHONUTF8: '1', BOILER_DATASET_PATH: dataset, REPLAY_INTERVAL_MS: '250', STALE_AFTER_MS: '2000', KAFKA_BOOTSTRAP_SERVERS: '127.0.0.1:19092', KAFKA_TOPIC: `boiler.e2e.${Date.now()}`, OLLAMA_BASE_URL: process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434', OLLAMA_MODEL: process.env.OLLAMA_MODEL ?? 'qwen2.5-coder:7b', AGENT_TRACE_DIR: resolve(out, 'agent-traces') };
@@ -40,7 +44,7 @@ async function loginApi(account = accounts[0]) {
 async function loginBrowser(page) {
   await page.goto(frontendUrl);
   mkdirSync(resolve(root, 'docs/images'), { recursive: true });
-  await page.screenshot({ path: resolve(root, 'docs/images/login.jpg'), type: 'jpeg', quality: 78 });
+  if (!agentReview) await page.screenshot({ path: resolve(root, 'docs/images/login.jpg'), type: 'jpeg', quality: 78 });
   await page.getByLabel('사용자 ID', { exact: true }).fill(accounts[0].user_id);
   await page.getByLabel('개인 접근 키', { exact: true }).fill(accounts[0].key);
   await page.getByRole('button', { name: '로그인', exact: true }).click();
@@ -103,7 +107,7 @@ try {
     if (event.current) telemetry.set(`${event.current.run_id}:${event.current.sequence}`, event.current);
   }));
   await loginBrowser(page);
-  if (!securityOnly) {
+  if (!securityOnly && !agentReview) {
   await poll(async () => await page.getByTestId('ws-status').textContent() === 'CONNECTED', 'WebSocket connected');
   start(python, ['-m', 'backend.app.replay.producer', '--limit', '16'], 'producer');
   await poll(async () => Number(await page.getByTestId('sequence').textContent()) >= 4, 'live UI');
@@ -214,7 +218,7 @@ try {
       const call = trace.calls.find(call => call.id === evidence.tool_id);
       let value = call.result;
       for (const key of evidence.path) value = value[key];
-      assert.equal(value, evidence.value);
+      assert.deepEqual(value, evidence.value);
     }
     assert.ok(trace.calls.every(call => call.equipment === 'feeders' && call.tool.startsWith('get_')));
     assert.equal((await apiFetch('http://127.0.0.1:8000/api/tools/get_sensor_history?equipment=feeders&tag=unknown')).status, 422);
@@ -310,7 +314,18 @@ try {
     await loginBrowser(page);
     await poll(async () => (await (await apiFetch('http://127.0.0.1:8000/api/state')).json()).current?.sequence === 16, 'security fixture recovered');
   }
-  if (phase === 'phase7') {
+  if (agentReview) {
+    await reviewAgentQuestions({ page, apiFetch, out, profile, forecastModel, mode: agentReview, poll, env, root, python, restartForStale: async () => {
+      env.STALE_AFTER_MS = '2000';
+      backend.kill();
+      await new Promise(resolve => backend.once('exit', resolve));
+      backend = start(python, apiArgs, 'backend-agent-stale');
+      await poll(async () => (await rawFetch('http://127.0.0.1:8000/api/health')).ok, 'stale review backend ready');
+      await loginBrowser(page);
+    } });
+    pass('Five real model questions recorded and browser answers matched API and source evidence');
+  }
+  if (phase === 'phase7' && !agentReview) {
     await reviewSecurity({ context, page, out, env, root, python, apiFetch, rawFetch, accounts, loginApi, frontendUrl, poll, restartForExpiry: async () => {
       env.AUTH_SESSION_SECONDS = '60';
       backend.kill();

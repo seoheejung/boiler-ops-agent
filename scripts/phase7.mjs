@@ -7,6 +7,19 @@ export async function validateFailures({ page, context, env, out, root, python, 
   const base = 'http://127.0.0.1:8000';
   const observations = [];
   const json = async path => (await apiFetch(base + path)).json();
+  const modelRequest = async (path, body) => {
+    const init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+    let response = await apiFetch(base + path, init);
+    if (response.status === 429) {
+      const seconds = Number(response.headers.get('retry-after'));
+      assert.ok(Number.isFinite(seconds) && seconds > 0 && seconds <= 60, 'Bounded Retry-After');
+      observations.push({ event: 'model-rate-wait', path, seconds });
+      console.log(`WAIT model request limit: ${seconds}s`);
+      await new Promise(resolve => setTimeout(resolve, seconds * 1000));
+      response = await apiFetch(base + path, init);
+    }
+    return response;
+  };
   const fault = mode => {
     const event = JSON.parse(execFileSync(python, ['-m', 'scripts.inject_fault', mode], { cwd: root, env, encoding: 'utf8' }));
     observations.push({ fault: mode, event }); return event;
@@ -91,7 +104,7 @@ export async function validateFailures({ page, context, env, out, root, python, 
   const modelPath = env.FORECAST_MODEL_PATH;
   renameSync(modelPath, modelPath + '.backup');
   try {
-    const response = await apiFetch(base + '/api/agent/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ equipment: 'reheater', question: 'Use get_temperature_forecast to report the predicted temperature.', tag: '최종재열기 입구 온도 평균값' }) });
+    const response = await modelRequest('/api/agent/query', { equipment: 'reheater', question: 'Use get_temperature_forecast to report the predicted temperature.', tag: '최종재열기 입구 온도 평균값' });
     const failure = await response.json();
     assert.equal(response.status, 503, JSON.stringify(failure));
     const trace = await json('/api/agent/traces/' + failure.detail.trace_id);
@@ -105,10 +118,10 @@ export async function validateFailures({ page, context, env, out, root, python, 
   const headers = { 'Content-Type': 'application/json' };
   const propose = async () => {
     fault('valid');
-    const query = await apiFetch(base + '/api/agent/query', { method: 'POST', headers, body: JSON.stringify({ equipment: 'reheater', tag: '최종재열기 입구 온도 평균값', question: 'Summarize current observed values.' }) });
+    const query = await modelRequest('/api/agent/query', { equipment: 'reheater', tag: '최종재열기 입구 온도 평균값', question: 'Summarize current observed values.' });
     assert.equal(query.status, 200, JSON.stringify(await query.clone().json()));
     const source = (await query.json()).trace_id;
-    const response = await apiFetch(base + '/api/simulator/proposals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source_trace_id: source, intent: 'Increase the local demo parameter by one synthetic step.' }) });
+    const response = await modelRequest('/api/simulator/proposals', { source_trace_id: source, intent: 'Increase the local demo parameter by one synthetic step.' });
     const data = await response.json(); assert.equal(response.status, 200, JSON.stringify(data)); return data;
   };
   const proposal = await propose();
