@@ -1,0 +1,7 @@
+{
+  "name": "boiler-ops-agent",
+  "private": true,
+  "scripts": {
+    "start": "uv run --frozen python scripts/start.py"
+  }
+}

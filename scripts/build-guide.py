@@ -6,7 +6,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = [
-    'README.md', 'docs/results/phase7-security-hardening.md',
+    'README.md', 'docs/local-development.md', 'docs/instructions/phase7-local-start.md',
+    'docs/results/phase7-local-start.md',
+    'docs/results/phase7-security-hardening.md',
     'docs/results/phase7-security-audit.md', 'docs/results/phase7-ui-accessibility-review.md',
     'docs/results/phase7-integrated-validation.md', 'docs/results/phase5-temperature-forecast.md',
     'docs/instructions/phase7-security-hardening.md', '.project/plan.md', 'DESIGN.md',
