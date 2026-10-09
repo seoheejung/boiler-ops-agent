@@ -1,67 +1,87 @@
 # BoilerOps Agent
 
-공개 보일러 운전 CSV를 **Kafka → FastAPI → WebSocket → React**로 재생하고, 선택한 센서의 이력·AI 근거·온도 예측을 확인하는 로컬 프로젝트입니다. Simulator는 사람의 승인 절차를 검증하는 `demo_bias` 상태 머신입니다. 실제 발전설비에 연결하지 않습니다.
+보일러의 과거 운전 데이터를 재생하면서 **센서 값, 온도 변화, AI 답변과 5분 뒤 예측**을 확인하는 로컬 앱입니다. 변경 승인은 연습용 Simulator에서만 실행하며, 실제 발전설비를 제어하지 않습니다.
 
-[그림으로 보는 프로젝트 지도](https://seoheejung.github.io/boiler-ops-agent/)를 브라우저로 열면 기능별 흐름, 타입·호출 계약, 코드와 검수 결과를 **같은 페이지에서** 읽을 수 있습니다.
+[그림으로 보는 프로젝트 지도](https://seoheejung.github.io/boiler-ops-agent/)에서 기능과 코드 구조를 볼 수 있습니다. 이 링크는 **설명 페이지**이며, 실제 앱은 아래 방법으로 실행합니다.
 
 ## 실행은 이렇게 하세요
 
-**Docker Desktop을 켠 뒤, 프로젝트 폴더에서 아래 명령 하나를 실행하세요.**
+### 처음 한 번 준비
+
+- **Node.js 22.12 이상, Python 3.13, uv, Docker Desktop, Ollama**가 필요합니다. 이미 설치했다면 다시 설치하지 않아도 됩니다. [설치 확인 방법](docs/local-development.md)
+- 원본 **CSV 파일을 `data/raw/` 폴더에 넣습니다.** CSV는 저장소에 포함되어 있지 않습니다. 기존 `.env`가 있으면 그 파일에 지정된 경로를 사용합니다.
+
+### 실행
+
+**Docker Desktop을 켜고**, 엔진이 준비될 때까지 기다립니다. 이 README와 `package.json`이 있는 프로젝트 폴더에서 PowerShell을 열고 실행하세요.
 
 ```powershell
 npm start
 ```
 
-터미널의 현재 폴더가 다른 곳이라면 먼저 다음 명령을 한 번 실행합니다.
+서버와 데이터 재생이 자동으로 시작되고 브라우저가 열립니다. 브라우저가 안 열리면 **http://127.0.0.1:5173**으로 접속합니다. 처음에는 설치와 모델 준비에 시간이 걸리며, 기본 AI 모델이 없으면 약 4.7GB를 다운로드합니다.
+
+### 로그인과 종료
+
+| 로그인 항목 | 입력할 값 |
+| --- | --- |
+| 사용자 ID | `operator` |
+| 개인 접근 키 | 터미널에 표시된 `operator`의 `Access key:` 뒤의 값 |
+
+**개인 접근 키는 최초 발급하거나 재발급할 때만 표시됩니다.** 평소 `npm start`로 시작하면 기존 키를 사용합니다. 키를 받은 적이 없거나 보관하지 못했다면 바로 아래의 재발급 명령을 사용하세요.
+
+화면의 숫자와 시간이 바뀌면 실행된 것입니다. **종료는 실행한 PowerShell 창에서 Enter**를 누르면 됩니다. 다음에 볼 때도 `npm start`를 실행하세요.
+
+## 개인 접근 키를 모를 때
+
+실행 중인 PowerShell 창에서 **Enter로 앱을 종료**한 뒤, 같은 폴더에서 실행하세요.
 
 ```powershell
-cd D:\01_Programming\08_AI\Agent\boiler-ops-agent
+npm run start:reset-key
 ```
 
-1. 준비가 끝나면 브라우저가 열립니다. 안 열리면 **http://127.0.0.1:5173**에 접속하세요.
-2. 사용자 ID에 **operator**, 개인 접근 키에 **처음 발급받은 키**를 입력합니다. 처음 실행하는 PC에서는 키가 터미널에 한 번 표시됩니다. 기존 키는 바꾸지 않습니다.
-3. 화면의 숫자와 시간이 바뀌면 실행된 것입니다. 끝낼 때는 실행한 터미널에서 **Enter** 또는 **Ctrl+C**를 누르세요.
+`operator`의 새 키를 발급하고 앱을 다시 시작합니다. 터미널에 나온 **`Access key:` 뒤의 긴 문자열만 복사**해서 로그인 화면의 개인 접근 키에 붙여넣으세요. 새 키는 안전하게 보관하세요.
 
-여러 터미널을 열거나 Docker 명령을 따로 입력할 필요가 없습니다. `npm start`가 설정 확인 → Kafka → 모델 → 화면 → API → 데이터 재생을 순서대로 처리합니다. 처음 준비에는 시간이 걸립니다.
+이전 operator 키는 더 이상 사용할 수 없습니다. Kafka 설정과 다른 사용자, 기존 조회·승인 기록은 유지됩니다. **`.env.security` 파일을 삭제할 필요가 없습니다.**
 
-### 처음 한 번 준비
+## 실행이 안 될 때
 
-- **원본 CSV**를 `data/raw/` 폴더에 넣습니다. 데이터는 저장소에 포함되어 있지 않습니다. 기존 `.env`가 있으면 그 파일에 지정된 CSV를 사용합니다.
-- 다른 PC라면 **Node.js 22.12 이상, Python 3.13과 uv, Docker Desktop, Ollama**를 먼저 설치합니다. 자세한 설치 확인은 [준비 안내](docs/local-development.md)를 참고하세요.
-- Python·화면 의존성, 필요한 AI 모델과 예측 파일은 실행 명령이 준비합니다. AI 모델이 없는 PC는 최초에 약 4.7GB를 다운로드합니다.
-
-### 안 될 때는 이 세 가지만 확인하세요
-
-| 화면에 나온 안내 | 할 일 |
+| 증상 | 확인할 것 |
 | --- | --- |
-| Docker Desktop을 켜 주세요 | Docker Desktop을 켜고 엔진이 준비된 뒤 `npm start`를 다시 실행 |
-| 원본 CSV가 없습니다 | `data/raw/`에 CSV를 넣고, 기존 `.env`가 있다면 파일 경로 확인 |
-| 포트를 사용 중입니다 | 전에 실행한 이 프로젝트의 터미널에서 종료한 뒤 다시 실행 |
+| `npm` 또는 `uv` 명령을 찾지 못함 | 도구 설치 후 PowerShell을 새로 열기 |
+| Docker 연결 실패 | Docker Desktop과 엔진이 준비됐는지 확인 |
+| 원본 CSV가 없다는 안내 | `data/raw/`의 파일과 기존 `.env`의 경로 확인 |
+| 포트를 사용 중이라는 안내 | 전에 실행한 이 프로젝트를 종료하고 다시 시작 |
+| 그 밖의 오류 | 터미널에 표시된 실패 단계와 로그 위치 확인 |
 
-다른 오류는 터미널에 **실패한 단계와 로그 위치**가 표시됩니다. 개인 접근 키를 잃었다면 [로그인 키 안내](docs/local-development.md)를 확인하세요. 설정 파일을 삭제하면 Kafka 자격도 사라지므로 그대로 보존합니다.
+자세한 확인 방법은 [문제 해결 안내](docs/local-development.md)에 있습니다. 설정 파일이나 키를 공유하지 마세요.
 
-`npm start`는 화면을 빌드해 여는 **로컬 확인용 실행**입니다. 코드 변경은 종료 후 다시 시작하면 반영됩니다. 저장 즉시 화면에 반영하는 개발 서버와 Docker 없이 기존 Kafka를 사용하는 방법은 [수동 개발 안내](docs/local-development.md)에 있습니다. 인증을 생략하는 모드는 없습니다.
+## 화면에서 할 수 있는 것
 
-실제 로그인·데이터 표시·종료를 포함한 [한 명령 실행 검증 7개 항목](docs/results/phase7-local-start.md)을 통과했습니다.
+- **센서 탐색:** 설비를 선택하고 현재값·원본 시각·이력을 확인합니다.
+- **AI 질문:** 현재값과 온도 변화 등을 질문하고 답변의 근거와 한계를 확인합니다.
+- **온도 예측:** 5분 뒤 예측값과 실제 시험 성능을 비교합니다.
+- **승인 연습:** 연습용 변경안을 검토하고 승인·거절 결과를 확인합니다.
 
-## 먼저 화면으로 보기
+![센서 값, 보일러 계통도와 선택한 센서의 상세 정보를 보여주는 실제 실행 화면](docs/images/dashboard.jpg)
 
-실제 CSV·Kafka·Ollama를 사용한 로컬 E2E에서 촬영한 화면입니다. 개인 접근 키와 세션 쿠키는 화면에 포함하지 않습니다.
-
-![KPI, 보일러 계통도, 선택한 센서의 Inspector가 표시된 실제 운전 화면](docs/images/dashboard.jpg)
-
-| 로그인 | 제안 검토와 승인 결과 |
+| 로그인 | 연습용 변경 승인 |
 | --- | --- |
-| ![개인 사용자 ID와 접근 키로 로그인하는 화면](docs/images/login.jpg) | ![로컬 Simulator 제안을 사람이 확인하고 실행한 결과](docs/images/simulator.jpg) |
+| ![사용자 ID와 개인 접근 키로 로그인하는 화면](docs/images/login.jpg) | ![연습용 변경안을 승인한 뒤 결과를 확인하는 화면](docs/images/simulator.jpg) |
 
-## 현재 구현과 한계
+## 알아둘 점
 
-Phase 1~7: 실시간 관측, 원본 Tag Registry, 이력·분석, Read Tool Agent, 5분 온도 예측, 승인 Simulator, 실패 복구를 구현했습니다. **최신 검증: 질문 5개·경계 상황 6개, 통합 E2E 19개 항목·보안 경계 51개 관측 통과.** 답변 변경 전후와 재검증은 [질문별 검수 결과](docs/results/phase7-agent-answers.md), 기존 접근 통제의 구현 근거는 [보안 보완 결과](docs/results/phase7-security-hardening.md)를 참고하세요. 최초 감사의 발견 사항과 당시 증거는 [원본 감사](docs/results/phase7-security-audit.md)에 보존합니다.
+- 현재 시각의 설비 데이터가 아니라 **2025년 3~4월의 과거 CSV**를 재생합니다.
+- 목표 온도, 측정 단위, 실제 설비 위치와 안전 기준은 미확인입니다. 값을 임의로 만들지 않습니다.
+- 현재 온도 예측 모델은 시험에서 단순 기준 모델보다 오차가 컸습니다. 실제 운전 판단에 사용할 수 없습니다.
+- `npm start`로 실행한 화면은 코드 수정 후 **종료하고 다시 실행**하면 반영됩니다. 저장 즉시 반영하는 개발 서버는 [수동 개발 안내](docs/local-development.md)를 참고하세요.
 
-- 50,400행: 2025-03-01 00:00 ~ 2025-04-04 23:59의 과거 공개 데이터입니다.
-- 목표 재열기 온도, 측정 단위, 실제 센서 좌표, 산업 안전 임계값은 미확인입니다.
-- 검증 MAE로 선택된 선형 모델의 시험 MAE는 0.105784이며 Naive 0.033211보다 나빴습니다. 예측은 실험·평가용입니다.
-- 2.5D Scene은 논리적 탐색 지도이며 실제 도면이나 Digital Twin이 아닙니다.
-- 기존 소유자 없는 Trace·제안·Audit는 사용자에게 공개하지 않습니다. 임의로 새 계정에 귀속하지 않습니다.
+## 더 자세히 보기
 
-기획: [.project/plan.md](.project/plan.md) · UI: [DESIGN.md](DESIGN.md) · 검수 기록: [접근성](docs/results/phase7-ui-accessibility-review.md).
+| 보고 싶은 내용 | 문서 |
+| --- | --- |
+| 기능 흐름·코드 지도·구현 전 설계 | [그림으로 보는 프로젝트 지도](https://seoheejung.github.io/boiler-ops-agent/) |
+| 개발 서버를 따로 실행하는 방법 | [수동 개발 안내](docs/local-development.md) |
+| 실제 실행과 검수 결과 | [실행 검증](docs/results/phase7-local-start.md) · [질문별 답변](docs/results/phase7-agent-answers.md) |
+| 접근성·보안 점검 | [접근성 검수](docs/results/phase7-ui-accessibility-review.md) · [보안 보완 결과](docs/results/phase7-security-hardening.md) |
+| 프로젝트 범위·화면 설계 | [프로젝트 계획](.project/plan.md) · [UI 설계](DESIGN.md) |

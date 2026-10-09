@@ -2,6 +2,8 @@
 
 2026-10-08 23:06 KST, Windows에서 실제 `npm start` 실행과 브라우저 검증 7개 항목을 통과했다. 별도 Kafka 프로젝트 `boiler-ops-start-e2e`, 원본 CSV, 로컬 Ollama, 실제 API·Chromium을 사용했다.
 
+2026-10-10 00:14 KST에는 개인 키 재발급을 포함한 **9개 항목**을 다시 검증했다. 새 키로 실제 브라우저 로그인, 이전 키 거부, 다른 사용자와 Kafka 설정 보존을 확인했다. 세부 내용은 아래 재발급 검증 기록에 있다.
+
 ## 사용자가 실행하는 순서
 
 ```text
@@ -32,7 +34,7 @@ Docker Desktop 켜기 → 프로젝트에서 npm start → 브라우저 로그�
 node scripts/check-start.mjs
 ```
 
-Docker Desktop과 Ollama를 먼저 켜고, 8000·5173·19093 포트를 비워 둔다. 기존 프론트엔드 의존성과 Playwright Chromium이 필요하다. 원본 CSV는 `data/raw/`에서 찾으며, `BOILER_DATASET_PATH`로 별도 지정할 수 있다.
+Docker Desktop을 켜고, 8000·5173·19093 포트를 비워 둔다. Ollama와 모델, 기존 프론트엔드 의존성, Playwright Chromium이 필요하다. Ollama가 꺼져 있으면 시작 도구가 실행하고 종료 시 함께 정리한다. 원본 CSV는 `data/raw/`에서 찾으며, `BOILER_DATASET_PATH`로 별도 지정할 수 있다.
 
 기록 경로는 `artifacts/e2e/phase7/local-start/<실행시각>/`이다.
 
@@ -48,3 +50,25 @@ Docker Desktop과 Ollama를 먼저 켜고, 8000·5173·19093 포트를 비워 �
 - 이 실행은 화면을 빌드해 제공한다. 코드 변경은 재시작 후 반영된다. Vite 개발 서버의 기존 esbuild 파일 접근 오류를 해결했다고 주장하지 않는다.
 - 검증에서는 `--no-browser`로 자동 브라우저 열기를 생략하고 Playwright로 실제 화면에 접속했다. 종료는 Enter로 확인했다. Ctrl+C의 운영체제별 전달과 macOS/Linux는 별도 확인이 필요하다.
 - 이미 설치된 도구·모델을 사용했다. 새 PC에서의 전체 설치, 최초 대용량 모델 다운로드, 네트워크 단절은 이번 실행에서 검증하지 않았다.
+
+## 개인 키 재발급 검증 — 2026-10-10
+
+```text
+Enter로 종료 → npm run start:reset-key → operator 해시만 교체
+                                            ↓
+                           새 Access key 표시 → 앱 시작 → 로그인
+```
+
+기존 `.env.security`가 있으면 일반 시작에서는 키를 다시 표시하지 않아, 처음 키를 보관하지 못한 사용자가 로그인할 수 없었다. 키 원문을 복원하는 대신 명시적인 재발급 명령을 추가했다. 같은 사용자 ID와 역할을 유지하므로 기존 기록의 소유권은 바뀌지 않는다.
+
+실제 검증에서 다음을 확인했다.
+
+- 새 키로 브라우저 로그인과 LIVE 데이터 수신 성공. 이전 operator 키는 HTTP 401로 거부.
+- 기존 viewer 키로 로그인 성공. operator 해시 외 계정 필드와 Kafka 자격·설정 보존.
+- API 실행 중 재발급 명령은 포트 검사에서 중단. 키 파일과 실행 중인 API 보존.
+- `AUTH_USERS_JSON` 환경 변수가 파일을 덮어쓰는 경우와 없는 사용자 지정은 변경 없이 거부.
+- 최초 실행·재실행·원본 CSV 대조·Enter 종료·API 시작 실패 정리·CSV 누락 처리 재검증.
+
+이번에는 Ollama가 꺼진 상태에서 시작했고, 실행 도구가 시작한 Ollama도 종료됨을 확인했다. `run.json`의 `ollama_preexisting`은 `false`다. 검증 코드가 항상 Ollama가 켜져 있다고 가정하던 부분을 실제 시작 전 상태와 비교하도록 고쳤다.
+
+재현 명령과 아티팩트 경로는 위와 같다. `recovered-login.jpg`에 재발급 키로 로그인한 화면을 저장한다. 테스트는 임시 자격만 사용했으며 실제 사용자의 키 파일은 열람하거나 변경하지 않았다. 로그·결과에서 키 원문을 제외하고 테스트 자격 파일과 컨테이너를 정리했다.

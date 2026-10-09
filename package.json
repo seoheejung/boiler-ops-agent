@@ -2,6 +2,7 @@
   "name": "boiler-ops-agent",
   "private": true,
   "scripts": {
-    "start": "uv run --frozen python scripts/start.py"
+    "start": "uv run --frozen python scripts/start.py",
+    "start:reset-key": "uv run --frozen python scripts/start.py --reset-key"
   }
 }

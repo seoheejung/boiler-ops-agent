@@ -78,7 +78,15 @@ uv run python scripts/setup-security.py --origin http://127.0.0.1:5173
 
 생성된 `.env.security`에는 접근 키의 SHA-256 해시와 Kafka의 서로 다른 관리자·생산자·소비자 자격이 저장됩니다. 접근 키 원문은 저장하지 않습니다. 이 파일은 Git에서 제외됩니다. **기존 파일이 있으면 명령은 덮어쓰지 않고 중단합니다.** 매번 실행할 필요가 없습니다.
 
-접근 키를 잃었다면 새로운 키와 해시를 발급해 해당 계정의 `key_hash`를 교체하고 API를 재시작해야 합니다. 기존 파일을 삭제해 Kafka 자격까지 무작정 바꾸지 마세요. 예전 `SIMULATOR_APPROVAL_TOKEN`은 더 이상 사용하지 않습니다.
+`operator` 접근 키를 잃었거나 발급된 키를 보관하지 못했다면, 실행 중인 앱을 Enter로 종료하고 프로젝트 루트에서 다음 명령을 실행합니다.
+
+```powershell
+npm run start:reset-key
+```
+
+새 `Access key`를 한 번 표시하고 앱을 다시 시작합니다. 이 값으로 로그인하세요. operator의 ID·역할·기록 소유권, 다른 사용자, Kafka 자격은 유지합니다. 이전 operator 키는 재시작한 앱에서 사용할 수 없습니다. `.env.security`를 삭제하지 마세요.
+
+다른 사용자의 키를 재발급해야 한다면 API를 먼저 종료한 뒤 `uv run python scripts/setup-security.py --reset-user 사용자ID`를 사용하고 다시 시작합니다. `AUTH_USERS_JSON` 환경 변수가 있으면 파일의 키보다 우선하므로, 재발급 도구가 값을 노출하지 않고 중단합니다. 예전 `SIMULATOR_APPROVAL_TOKEN`은 더 이상 사용하지 않습니다.
 
 브라우저는 반드시 `http://127.0.0.1:5173`으로 엽니다. `localhost`, 다른 포트, 다른 Origin은 동일한 주소로 취급하지 않습니다. 화면 주소를 바꿀 때는 `.env.security`의 `APP_PUBLIC_ORIGIN`도 함께 바꾸고 API를 재시작합니다.
 

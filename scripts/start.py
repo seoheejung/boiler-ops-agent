@@ -85,7 +85,8 @@ class Runner:
         child = self.start(args, name, transient=True, console=console, cwd=cwd)
         self.wait_ready(lambda: child.poll() is not None, name, timeout)
         if child.returncode:
-            raise StartError(f"{name} 단계에 실패했습니다. 로그: {self.logs / (name + '.log')}")
+            detail = "위 안내를 확인하세요." if console else f"로그: {self.logs / (name + '.log')}"
+            raise StartError(f"{name} 단계에 실패했습니다. {detail}")
         if not console:
             return (self.logs / f"{name}.log").read_text(encoding="utf-8", errors="replace")
         return ""
@@ -131,7 +132,7 @@ class Runner:
             log.close()
 
 
-def prepare_config(runner, config_dir):
+def prepare_config(runner, config_dir, reset_key=False):
     config_file = config_dir / ".env"
     if not config_file.exists():
         candidates = list((ROOT / "data/raw").glob("*.csv"))
@@ -147,6 +148,10 @@ def prepare_config(runner, config_dir):
         say("처음 실행: 로그인 키를 발급합니다. 아래 operator의 Access key를 안전한 곳에 보관하세요.")
         runner.run([PYTHON, str(ROOT / "scripts/setup-security.py"), "--origin", URL],
                    "login-key-setup", console=True, cwd=config_dir)
+    elif reset_key:
+        say("operator의 개인 접근 키를 재발급합니다. 다른 사용자와 Kafka 설정은 유지합니다.")
+        runner.run([PYTHON, str(ROOT / "scripts/setup-security.py"), "--reset-user", "operator"],
+                   "login-key-reset", console=True, cwd=config_dir)
     values = {**dotenv_values(config_file), **dotenv_values(security_file)}
     runner.env = {**{key: value for key, value in values.items() if value is not None}, **runner.env}
     env = runner.env
@@ -168,7 +173,7 @@ def prepare_config(runner, config_dir):
     return dataset
 
 
-def main(config_dir, no_browser):
+def main(config_dir, no_browser, reset_key=False):
     os.chdir(ROOT)
     config_dir.mkdir(parents=True, exist_ok=True)
     runner = Runner(config_dir)
@@ -185,7 +190,7 @@ def main(config_dir, no_browser):
             runner.run(["docker", "info", "--format", "{{.ServerVersion}}"], "docker-check", timeout=25)
         except StartError:
             raise StartError("Docker Desktop을 켜고 엔진이 준비되면 npm start를 다시 실행하세요.") from None
-        dataset = prepare_config(runner, config_dir)
+        dataset = prepare_config(runner, config_dir, reset_key)
         env = runner.env
         say("[2/6] 데이터 전달 서비스를 준비합니다.")
         running = runner.run(runner.compose + ["ps", "--status", "running", "--quiet", "kafka"], "kafka-status").strip()
@@ -245,7 +250,7 @@ def main(config_dir, no_browser):
 
         runner.wait_ready(replay_started, "CSV 재생")
         runner.check()
-        say(f"\n화면이 준비됐습니다: {URL}\n사용자 ID: operator / 개인 접근 키: 최초 발급 때 보관한 키\n종료하려면 이 창에서 Enter 또는 Ctrl+C를 누르세요.\n실행 로그: {runner.logs}")
+        say(f"\n화면이 준비됐습니다: {URL}\n사용자 ID: operator / 개인 접근 키: 발급할 때 표시된 Access key\n키를 모르면 Enter로 종료한 뒤 npm run start:reset-key를 실행하세요.\n종료하려면 이 창에서 Enter 또는 Ctrl+C를 누르세요.\n실행 로그: {runner.logs}")
         if not no_browser and not webbrowser.open(URL):
             say(f"브라우저 주소창에 {URL}을 입력하세요.")
 
@@ -281,5 +286,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config-dir", type=Path, default=ROOT, help=".env와 .env.security가 있는 폴더")
     parser.add_argument("--no-browser", action="store_true", help="브라우저 자동 열기 생략")
+    parser.add_argument("--reset-key", action="store_true", help="operator의 개인 키를 재발급한 뒤 시작")
     args = parser.parse_args()
-    raise SystemExit(main(args.config_dir.resolve(), args.no_browser))
+    raise SystemExit(main(args.config_dir.resolve(), args.no_browser, args.reset_key))

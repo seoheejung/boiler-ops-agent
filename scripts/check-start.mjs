@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:net';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -29,14 +29,16 @@ const composeArgs = ['compose', '--project-directory', root, '-f', resolve(root,
 const compose = (...args) => execFileSync('docker', [...composeArgs, ...args], { cwd: root, env, windowsHide: true, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 const digest = file => createHash('sha256').update(readFileSync(file)).digest('hex');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const ollamaRunning = () => fetch('http://127.0.0.1:11434/api/tags').then(response => response.ok).catch(() => false);
 const result = { started_at: new Date().toISOString(), input_sha256: digest(dataset), checks: [] };
 const executions = [];
 let child, browser;
 let output = '';
 const secrets = [];
-function launch() {
+function launch(script = 'start') {
   output = '';
-  child = spawn(process.execPath, [npmCli, 'start', '--', '--config-dir', config, '--no-browser'], { cwd: root, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  const command = script === 'start' ? ['start'] : ['run', script];
+  child = spawn(process.execPath, [npmCli, ...command, '--', '--config-dir', config, '--no-browser'], { cwd: root, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   child.stdout.on('data', chunk => { output += chunk.toString('utf8'); });
   child.stderr.on('data', chunk => { output += chunk.toString('utf8'); });
   return child;
@@ -69,12 +71,15 @@ async function free(port) {
 function pass(name) { result.checks.push(name); console.log(`PASS ${name}`); }
 try {
   for (const port of [8000, 5173, 19093]) await free(port);
+  result.ollama_preexisting = await ollamaRunning();
   launch();
   await poll(() => output.includes('화면이 준비됐습니다:'), 'first npm start', 600000);
   const accessKey = output.match(/User ID: operator\s+Access key: (\S+)/)?.[1];
+  const viewerKey = output.match(/User ID: viewer\s+Access key: (\S+)/)?.[1];
   assert.ok(accessKey, 'First run issues a personal key in the terminal');
+  assert.ok(viewerKey, 'First run issues the independent viewer key');
   assert.equal(readFileSync(configFile, 'utf8'), text);
-  const securityHash = digest(resolve(config, '.env.security'));
+  let securityHash = digest(resolve(config, '.env.security'));
   pass('First npm start prepares a new login, Kafka, forecast, API, frontend and replay');
   browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
@@ -98,12 +103,13 @@ try {
   await browser.close(); browser = null;
   const active = child;
   const activeOutput = output;
-  launch();
+  launch('start:reset-key');
   await poll(() => child.exitCode !== null, 'duplicate rejection');
   assert.equal(child.exitCode, 1); assert.match(output, /8000 포트를 사용 중/); remember();
+  assert.equal(digest(resolve(config, '.env.security')), securityHash);
   child = active; output = activeOutput;
   assert.equal((await fetch('http://127.0.0.1:8000/api/health')).status, 200);
-  pass('Duplicate startup is rejected without terminating the active API');
+  pass('Recovery while the API is running is rejected before changing keys or terminating the API');
   await stop();
   for (const port of [8000, 5173, 19093]) await free(port);
   assert.equal(compose('ps', '--status', 'running', '--quiet', 'kafka').trim(), '');
@@ -116,8 +122,62 @@ try {
   assert.equal(readFileSync(configFile, 'utf8'), text);
   await stop();
   assert.ok(compose('ps', '--status', 'running', '--quiet', 'kafka').trim());
-  assert.ok(await fetch('http://127.0.0.1:11434/api/tags').then(response => response.ok));
-  pass('Second run preserves configuration, credentials, already-running Kafka and Ollama');
+  assert.equal(await ollamaRunning(), result.ollama_preexisting);
+  pass('Second run preserves configuration, credentials, already-running Kafka and original Ollama state');
+  const securityFile = resolve(config, '.env.security');
+  const securityBefore = readFileSync(securityFile, 'utf8');
+  const accountRecords = text => JSON.parse(text.match(/^AUTH_USERS_JSON='(.*)'$/m)[1]);
+  const beforeAccounts = accountRecords(securityBefore);
+  for (const match of securityBefore.matchAll(/^KAFKA_\w+_PASSWORD=(.+)$/gm)) secrets.push(match[1].trim());
+  for (const [label, extraEnv, user] of [
+    ['environment override', { AUTH_USERS_JSON: '[]' }, 'operator'],
+    ['missing account', {}, 'nonexistent'],
+  ]) {
+    const rejected = spawnSync(python, [resolve(root, 'scripts/setup-security.py'), '--reset-user', user], {
+      cwd: config, env: { ...env, ...extraEnv }, windowsHide: true, encoding: 'utf8', timeout: 30000,
+    });
+    assert.equal(rejected.status, 2, label);
+    assert.equal(digest(securityFile), securityHash, label);
+  }
+  pass('Credential environment override and missing-account recovery are rejected without changing files');
+  launch('start:reset-key');
+  await poll(() => output.includes('화면이 준비됐습니다:'), 'key recovery and startup', 300000);
+  const recoveredKey = output.match(/User ID: operator\s+Access key: (\S+)/)?.[1];
+  assert.ok(recoveredKey && recoveredKey !== accessKey);
+  secrets.push(recoveredKey);
+  const securityAfter = readFileSync(securityFile, 'utf8');
+  const afterAccounts = accountRecords(securityAfter);
+  const withoutAccounts = text => text.split(/\r?\n/).filter(line => !line.startsWith('AUTH_USERS_JSON=')).join('\n');
+  assert.ok(withoutAccounts(securityBefore) === withoutAccounts(securityAfter), 'Kafka credentials and other settings preserved');
+  for (const account of beforeAccounts) {
+    const updated = afterAccounts.find(item => item.user_id === account.user_id);
+    if (account.user_id === 'operator') {
+      assert.ok(JSON.stringify(updated) === JSON.stringify({ ...account, key_hash: createHash('sha256').update(recoveredKey).digest('hex') }), 'Only operator key hash changes');
+    } else assert.ok(JSON.stringify(updated) === JSON.stringify(account), 'Other users preserved');
+  }
+  const login = key => fetch('http://127.0.0.1:5173/api/session', { method: 'POST',
+    headers: { Origin: 'http://127.0.0.1:5173', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: 'operator', access_key: key }),
+  });
+  assert.equal((await login(accessKey)).status, 401, 'Old operator key rejected');
+  assert.equal((await fetch('http://127.0.0.1:5173/api/session', { method: 'POST',
+    headers: { Origin: 'http://127.0.0.1:5173', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: 'viewer', access_key: viewerKey }),
+  })).status, 200, 'Existing viewer key still works');
+  browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  const recovered = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
+  await recovered.goto('http://127.0.0.1:5173');
+  await recovered.getByLabel('사용자 ID', { exact: true }).fill('operator');
+  await recovered.getByLabel('개인 접근 키', { exact: true }).fill(recoveredKey);
+  await recovered.getByRole('button', { name: '로그인', exact: true }).click();
+  await poll(async () => await recovered.getByTestId('ws-status').textContent() === 'CONNECTED', 'recovered login');
+  await poll(async () => Number(await recovered.getByTestId('sequence').textContent()) >= 3, 'recovered telemetry');
+  assert.match(await recovered.getByTestId('stream-status').textContent(), /LIVE/);
+  await recovered.screenshot({ path: resolve(out, 'recovered-login.jpg'), type: 'jpeg', quality: 78 });
+  await browser.close(); browser = null;
+  securityHash = digest(securityFile);
+  await stop();
+  pass('Reissued key logs in through the browser; old key is rejected; viewer and Kafka remain usable');
   compose('stop', 'kafka');
   writeFileSync(configFile, text.replace(values.SIMULATOR_DB_PATH.replaceAll('\\', '/'), out.replaceAll('\\', '/')));
   launch();
