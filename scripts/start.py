@@ -65,7 +65,8 @@ class Runner:
         flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         try:
             child = subprocess.Popen(args, cwd=cwd, env=self.env, stdin=subprocess.DEVNULL,
-                                     stdout=log, stderr=log, creationflags=flags,
+                                     stdout=subprocess.PIPE if console else log,
+                                     stderr=subprocess.STDOUT if console else log, creationflags=flags,
                                      start_new_session=os.name != "nt")
         except OSError:
             raise StartError(f"{name} 명령을 실행하지 못했습니다. 필요한 프로그램 설치 상태를 확인하세요.") from None
@@ -83,7 +84,25 @@ class Runner:
 
     def run(self, args, name, *, timeout=180, console=False, cwd=ROOT):
         child = self.start(args, name, transient=True, console=console, cwd=cwd)
+        display_failed = threading.Event()
+        forwarding = None
+        if console:
+            def forward_console():
+                try:
+                    with child.stdout:
+                        for line in child.stdout:
+                            sys.stdout.write(line.decode("utf-8"))
+                            sys.stdout.flush()
+                except (OSError, UnicodeError):
+                    display_failed.set()
+
+            forwarding = threading.Thread(target=forward_console, daemon=True)
+            forwarding.start()
         self.wait_ready(lambda: child.poll() is not None, name, timeout)
+        if forwarding:
+            forwarding.join(timeout=5)
+            if forwarding.is_alive() or display_failed.is_set():
+                raise StartError("키 발급 안내를 터미널에 표시하지 못했습니다. npm run start:reset-key로 다시 발급하세요.")
         if child.returncode:
             detail = "위 안내를 확인하세요." if console else f"로그: {self.logs / (name + '.log')}"
             raise StartError(f"{name} 단계에 실패했습니다. {detail}")
